@@ -38,6 +38,12 @@ public sealed class TargetSeekingSystem : EntitySystem
     /// </summary>
     private static readonly TimeSpan SeekerTargetAcquisitionInterval = TimeSpan.FromSeconds(0.5);
 
+    /// <summary>
+    /// How many potential targets can we have in <see cref="AcquireTarget"/> before
+    /// stopping looking for any new ones? 
+    /// </summary>
+    private const int MaximumPotentialTargets = 120;
+
     public override void Initialize()
     {
         base.Initialize();
@@ -237,10 +243,15 @@ public sealed class TargetSeekingSystem : EntitySystem
                 continue;
 
             var targetMapCoordinates = _transform.GetMapCoordinates(targetTransformComponent);
+            // out of sight, out of mind
             if (Vector2.DistanceSquared(targetMapCoordinates.Position, sourcePos) > detectionRangeSquared)
                 continue;
 
             validSignatureEntities[bodyUid] = (targetMapCoordinates, bodySignature);
+
+            // just stop
+            if (validSignatureEntities.Count > MaximumPotentialTargets)
+                break;
         }
 
         if (validSignatureEntities.Count == 0)
