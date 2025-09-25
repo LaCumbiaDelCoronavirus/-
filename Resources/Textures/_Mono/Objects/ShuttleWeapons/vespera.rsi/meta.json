@@ -1,7 +1,7 @@
 {
     "version": 1,
     "license": "CC-BY-3.0",
-    "copyright": "Created by kyres1 (discord)",
+    "copyright": "space_artillery created by kyres1 (discord), modified into space_artillery_flare by LaCumbiaDelCoronavirus",
     "size": {
         "x": 48,
         "y": 48
@@ -9,6 +9,10 @@
     "states": [
         {
             "name": "space_artillery",
+            "directions": 4
+        },
+        {
+            "name": "space_artillery_flare",
             "directions": 4
         }
     ]

@@ -13,6 +13,11 @@ using Content.Shared.Projectiles;
 using Robust.Server.GameObjects;
 using Robust.Shared.Physics.Components;
 using Robust.Shared.Timing;
+using Content.Server._Mono.Detection;
+using JetBrains.Annotations;
+using Content.Shared._Mono.Detection;
+using Robust.Shared.Map;
+using System.Linq;
 
 namespace Content.Server._Mono.Projectiles.TargetSeeking;
 
@@ -24,7 +29,14 @@ public sealed class TargetSeekingSystem : EntitySystem
     [Dependency] private readonly SharedTransformSystem _transform = null!;
     [Dependency] private readonly RotateToFaceSystem _rotateToFace = null!;
     [Dependency] private readonly PhysicsSystem _physics = null!;
+    [Dependency] private readonly ThermalSignatureSystem _thermalSignatureSystem = null!;
     [Dependency] private readonly IGameTiming _gameTiming = default!; // Mono
+
+    /// <summary>
+    /// Minimum amount of time that must pass since the last attempt to acquire a target,
+    /// before trying to acquire a target again.
+    /// </summary>
+    private static readonly TimeSpan SeekerTargetAcquisitionInterval = TimeSpan.FromSeconds(0.5);
 
     public override void Initialize()
     {
@@ -110,12 +122,16 @@ public sealed class TargetSeekingSystem : EntitySystem
                 continue;
             }
 
+            // Whether we should try and look for a new target.
+            // If we can lose our target, then always try to find a new one.
+            var tryGetTarget = seekingComp.CanLoseTarget;
+
             // If we have a target, track it using the selected algorithm
             if (seekingComp.CurrentTarget.HasValue && !TerminatingOrDeleted(seekingComp.CurrentTarget))
             {
                 var target = seekingComp.CurrentTarget.Value;
                 var targetXform = Transform(target);
-                Angle wantAngle = new Angle(0);
+                var wantAngle = new Angle(0);
 
                 var ourEnt = (uid, seekingComp, xform);
                 var targEnt = (target, targetXform);
@@ -139,35 +155,118 @@ public sealed class TargetSeekingSystem : EntitySystem
                     xform
                 );
             }
-            else
+            else // if we don't have a target, try and get one
+                tryGetTarget = true;
+
+            if (tryGetTarget &&
+                _gameTiming.CurTime > seekingComp.NextTargetAcquisitionAttempt)
             {
-                // Try to acquire a new target
+                // Its time to find and kill
                 AcquireTarget(uid, seekingComp, xform);
+                seekingComp.NextTargetAcquisitionAttempt = _gameTiming.CurTime + SeekerTargetAcquisitionInterval;
             }
         }
     }
 
     /// <summary>
-    /// Finds the closest valid target within range and tracking parameters.
+    /// Returns a score for how 'attractive' a target is to a target-seeker, depending on thermal signature and distance.
+    /// </summary>
+    [Pure]
+    private float GetTargetInfluence(in float thermalSignature, in float distance, in float power)
+        => thermalSignature / (MathF.Pow(distance, power) + float.Epsilon);
+
+    /// <summary>
+    /// Finds the most optimal valid target within range and tracking parameters.
     /// </summary>
     public void AcquireTarget(EntityUid uid, TargetSeekingComponent component, TransformComponent transform)
     {
-        var closestDistance = float.MaxValue;
-        EntityUid? bestTarget = null;
+        // this method is a tutorial on how to troll the gc
+        /*
+        Normally, the required threshold for a target to be considered is our ThermalSignatureThreshold.
 
-        // Look for shuttles to target
-        var shuttleQuery = EntityQueryEnumerator<ShuttleConsoleComponent, TransformComponent>();
+        However, if we can change targets and have to compare thermalsig, the new target must have a higher
+        signature.
 
-        while (shuttleQuery.MoveNext(out var targetUid, out _, out var targetXform))
+        TODO: give every owned grid TargetSeekable instead of relying on shuttleconsoles?
+        */
+
+        // Are we allowed to replace our current target with a new one?
+        var canRealisticallyLoseTarget = component.CurrentTarget.HasValue;
+
+        // Minimum required cellsig.
+        var minimumRequiredSignature = canRealisticallyLoseTarget && component.TargetingComparesThermalSignature ?
+            MathF.Max(component.ThermalSignatureThreshold, _thermalSignatureSystem.GetSignature(component.CurrentTarget!.Value)) : component.ThermalSignatureThreshold;
+
+        if (minimumRequiredSignature < SharedThermalSignatureSystem.SignatureZeroEpsilon)
+            minimumRequiredSignature = SharedThermalSignatureSystem.SignatureZeroEpsilon;
+
+        // entity: heat-signature+position
+        var validSignatureEntities = new Dictionary<EntityUid, (MapCoordinates, float)>();
+
+        var targetQuery = EntityQueryEnumerator<TargetSeekableComponent, TransformComponent>();
+        var sourcePos = _transform.ToMapCoordinates(transform.Coordinates).Position;
+
+        var detectionRangeSquared = component.DetectionRange * component.DetectionRange;
+
+        // The uid of the entity that shot this missile/target-seeker.
+        EntityUid? shooterUid = null;
+        if (TryComp<ProjectileComponent>(uid, out var projectile) &&
+            TryComp(projectile.Shooter, out TransformComponent? shooterTransform))
+            shooterUid = shooterTransform.GridUid ?? projectile.Shooter;
+
+        while (targetQuery.MoveNext(out var targetUid, out _, out var targetTransformComponent))
         {
-            // If this entity has a grid UID, use that as our actual target
-            // This targets the ship grid rather than just the console
-            var actualTarget = targetXform.GridUid ?? targetUid;
+            if (targetTransformComponent.MapID != transform.MapID)
+                continue;
+
+            /*
+            The body can either be a seekable target, or it's grid.
+            If the target has a grid, use that as the body.
+
+            Ignore this body if it's our current target, or is the body that launched us.
+            */
+
+            var bodyUid = targetTransformComponent.GridUid ?? targetUid;
+            if (bodyUid == component.CurrentTarget || // dont target our current target
+                bodyUid == shooterUid || // dont target ourself
+                validSignatureEntities.ContainsKey(bodyUid))
+                continue;
+
+            var bodySignature = _thermalSignatureSystem.GetSignature(bodyUid);
+            if (bodySignature < minimumRequiredSignature)
+                continue;
+
+            var targetMapCoordinates = _transform.GetMapCoordinates(targetTransformComponent);
+            if (Vector2.DistanceSquared(targetMapCoordinates.Position, sourcePos) > detectionRangeSquared)
+                continue;
+
+            validSignatureEntities[bodyUid] = (targetMapCoordinates, bodySignature);
+        }
+
+        if (validSignatureEntities.Count == 0)
+            return;
+
+        // get the strongest-signature group of entities
+        var bestSignatures = _thermalSignatureSystem.SolveSignatureCollections(validSignatureEntities);
+
+        var bestScore = component.CurrentTargetScore ?? float.MinValue;
+        EntityUid? bestTarget = component.CurrentTarget ?? null;
+
+        // Look for things to target
+        foreach (var (targetUid, targetSignature) in bestSignatures)
+        {
+            /// continue if the target doesn't have high enough of a thermal signature
+            if (!TryComp(targetUid, out TransformComponent? targetXform))
+                continue;
 
             // Get angle to the target
             var targetPos = _transform.ToMapCoordinates(targetXform.Coordinates).Position;
-            var sourcePos = _transform.ToMapCoordinates(transform.Coordinates).Position;
             var angleToTarget = (targetPos - sourcePos).ToWorldAngle();
+
+            // we can't update if this target is worse than the last best score
+            var targetScore = GetTargetInfluence(targetSignature, Vector2.Distance(sourcePos, targetPos), component.TargetDistanceScoringPower);
+            if (targetScore < bestScore)
+                continue;
 
             // Get current direction of the projectile
             var currentRotation = _transform.GetWorldRotation(transform);
@@ -179,39 +278,18 @@ public sealed class TargetSeekingSystem : EntitySystem
                 continue; // Target is outside our field of view
             }
 
-            // Calculate distance to target
-            var distance = Vector2.Distance(sourcePos, targetPos);
-
-            // Skip if target is out of range
-            if (distance > component.DetectionRange)
-            {
-                continue;
-            }
-
-            // Skip if the target is our own launcher (don't target our own ship)
-            if (TryComp<ProjectileComponent>(uid, out var projectile) &&
-                TryComp<TransformComponent>(projectile.Shooter, out var shooterTransform))
-            {
-                var shooterGridUid = shooterTransform.GridUid;
-
-                // If the shooter is on the same grid as this potential target, skip it
-                if (targetXform.GridUid.HasValue && shooterGridUid == targetXform.GridUid)
-                {
-                    continue;
-                }
-            }
-
-            // If this is closer than our previous best target, update
-            if (closestDistance > distance)
-            {
-                closestDistance = distance;
-                bestTarget = actualTarget;
-            }
+            bestScore = targetScore;
+            bestTarget = targetUid;
         }
 
         // Set our new target
         if (bestTarget.HasValue)
+        {
+            component.CurrentTargetScore = bestScore;
             component.CurrentTarget = bestTarget;
+
+            Log.Debug($"Locked onto a target! {ToPrettyString(bestTarget.Value)}");
+        }
     }
 
     /// <summary>
@@ -264,22 +342,22 @@ public sealed class TargetSeekingSystem : EntitySystem
 
         var accel = ent.Comp1.Acceleration;
 
-        var ownVel    = _physics.GetMapLinearVelocity(ent);
-        var ownPos    = _transform.GetWorldPosition(ent.Comp2);
+        var ownVel = _physics.GetMapLinearVelocity(ent);
+        var ownPos = _transform.GetWorldPosition(ent.Comp2);
         var targetVel = _physics.GetMapLinearVelocity(target);
         var targetPos = _transform.GetWorldPosition(target.Comp);
         var relVel = targetVel - ownVel;
         var relPos = targetPos - ownPos;
 
-        var dVx    = relVel.X;
-        var dVy    = relVel.Y;
-        var dX     = relPos.X;
-        var dY     = relPos.Y;
+        var dVx = relVel.X;
+        var dVy = relVel.Y;
+        var dX = relPos.X;
+        var dY = relPos.Y;
         var refRot = MathF.Atan2(dVy, dVx);
-        var vel    = dVx / MathF.Cos(refRot);
-        var projX  = dX * MathF.Cos(refRot) + dY * MathF.Sin(refRot);
-        var projY  = dY * MathF.Cos(refRot) - dX * MathF.Sin(refRot);
-        var itime  = GuessInterceptTime(0f, -projX, -vel, projY, accel);
+        var vel = dVx / MathF.Cos(refRot);
+        var projX = dX * MathF.Cos(refRot) + dY * MathF.Sin(refRot);
+        var projY = dY * MathF.Cos(refRot) - dX * MathF.Sin(refRot);
+        var itime = GuessInterceptTime(0f, -projX, -vel, projY, accel);
         for (var i = 0; i < guidanceIterations; i++)
             itime = GuessInterceptTime(itime, -projX, -vel, projY, accel);
 
@@ -288,9 +366,10 @@ public sealed class TargetSeekingSystem : EntitySystem
         return targetRot;
 
         // the explanation for how this works would take more space than the enclosing method so it's not included here
-        float GuessInterceptTime(float prev, float x0, float vel, float y0, float accel) {
-            var x  = x0 + vel * prev;
-            var d  = MathF.Sqrt(x * x + y0 * y0);
+        float GuessInterceptTime(float prev, float x0, float vel, float y0, float accel)
+        {
+            var x = x0 + vel * prev;
+            var d = MathF.Sqrt(x * x + y0 * y0);
             var dd = vel * x / d;
             return (dd + MathF.Sqrt(dd * dd + 2f * accel * (d - dd * prev))) / (accel);
         }

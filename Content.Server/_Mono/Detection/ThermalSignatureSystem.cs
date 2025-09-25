@@ -11,23 +11,35 @@ using Content.Shared.Shuttles.Components;
 using Content.Shared.Shuttles.Systems;
 using Content.Shared.Weapons.Ranged.Components;
 using Content.Shared.Weapons.Ranged.Systems;
+using Robust.Server.GameObjects;
+using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
-using System;
+using System.Diagnostics;
+using System.Numerics;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using DependencyAttribute = Robust.Shared.IoC.DependencyAttribute;
 
 namespace Content.Server._Mono.Detection;
 
 /// <summary>
 ///     Handles the logic for thermal signatures.
 /// </summary>
-public sealed class ThermalSignatureSystem : EntitySystem
+public sealed class ThermalSignatureSystem : SharedThermalSignatureSystem
 {
     [Dependency] private readonly SharedPowerReceiverSystem _power = default!;
+    [Dependency] private readonly TransformSystem _transformSystem = default!;
 
+    private readonly Stopwatch _stopwatch = new();
     private TimeSpan _updateInterval = TimeSpan.FromSeconds(0.5);
     private TimeSpan _updateAccumulator = TimeSpan.FromSeconds(0);
     private EntityQuery<MapGridComponent> _gridQuery;
-    private EntityQuery<ThermalSignatureComponent> _sigQuery;
     private EntityQuery<GunComponent> _gunQuery;
+
+    // length of cells in SolveSignatureCollections; map gets higher resolution the lower this is, therefore making this take a generally longer time to process
+    // stats: 20 resolution gives ~.61 ms processing time for 55 signatures
+    private const float SignatureResolution = 20f;
+    private const float SignatureResolutionSq = SignatureResolution * SignatureResolution;
 
     public override void Initialize()
     {
@@ -43,7 +55,6 @@ public sealed class ThermalSignatureSystem : EntitySystem
         SubscribeLocalEvent<FTLDriveComponent, GetThermalSignatureEvent>(OnFTLGetSignature);
 
         _gridQuery = GetEntityQuery<MapGridComponent>();
-        _sigQuery = GetEntityQuery<ThermalSignatureComponent>();
         _gunQuery = GetEntityQuery<GunComponent>();
     }
 
@@ -85,6 +96,82 @@ public sealed class ThermalSignatureSystem : EntitySystem
             args.Signature += ent.Comp.ThermalSignature;
     }
 
+    /// <summary>
+    ///     Applys the heat of thermal signatures to surrounding cells where possible.
+    /// 
+    ///     This is done because "feature `ref and unsafe in async and iterator methods` is not available in C# 12.0."
+    ///     TODO: Remove this when on C# 13.0+
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)] // AIL is (probably?) fine because this is private and only used once.
+    private static void ApplyGridEmissions(Dictionary<Vector2i, float> grid, List<(Vector2i Coordinates, float Emission, EntityUid)> emissions, out Vector2i? hottestCell, out float lastHottest)
+    {
+        hottestCell = null;
+        lastHottest = float.MinValue;
+
+        // go through each grid cell, and for each cell go through every thermal signature and apply it's heat to this one
+        foreach (var (gridCoordinates, _) in grid)
+        {
+            var thisHeat = 0f;
+            ref var thisCellSignature = ref CollectionsMarshal.GetValueRefOrNullRef(grid, gridCoordinates);
+
+            foreach (var (otherCoordinates, signature, _) in emissions)
+            {
+                var heat = ThermalDistantialFalloff(signature, Vector2.DistanceSquared(gridCoordinates, otherCoordinates) * SignatureResolutionSq);
+
+                thisCellSignature += signature;
+                thisHeat += heat;
+            }
+
+            if (thisHeat > lastHottest)
+            {
+                lastHottest = thisHeat;
+                hottestCell = gridCoordinates;
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Creates a map of thermal signatures. This is used to simulate many, separate thermal signatures
+    ///         in a small area emitting alot of heat. Returns the signatures in the hottest cell, and the signature of its cell.
+    /// 
+    ///     Only cells that have thermal signatures in them are modelled.
+    /// </summary>
+    public IEnumerable<(EntityUid, float Signature)> SolveSignatureCollections(Dictionary<EntityUid, (MapCoordinates Coordinates, float Signature)> entities)
+    {
+        _stopwatch.Restart();
+
+        // cell position: total heat in that cell
+        var grid = new Dictionary<Vector2i, float>();
+        // list of every emission with the cell it's in, with it's cell coordinates
+        var emissions = new List<(Vector2i Coordinates, float Emission, EntityUid)>(entities.Count);
+
+        /// curse of 220 foreaches
+        // map out emissions, initialise the grid (as we only process cells with signatures in them)
+        foreach (var (uid, (coordinates, signature)) in entities)
+        {
+            // the cell that this signature is in
+            var cellCoordinates = new Vector2i((int)MathF.Floor(coordinates.X / SignatureResolution), (int)MathF.Floor(coordinates.Y / SignatureResolution));
+            grid[cellCoordinates] = default;
+
+            emissions.Add((cellCoordinates, signature, uid));
+        }
+
+        // distribute heat across cells
+        ApplyGridEmissions(grid, emissions, out var hottestCell, out var lastHottest);
+
+        if (lastHottest <= float.MinValue || hottestCell == null)
+            yield break;
+
+        var hottestCellSignature = grid[hottestCell.Value];
+        foreach (var (cellCoordinates, _, uid) in emissions)
+        {
+            if (cellCoordinates == hottestCell)
+                yield return (uid, hottestCellSignature);
+        }
+
+        Log.Debug($"Took {_stopwatch.Elapsed.TotalMilliseconds}ms to process {entities.Count} signatures.");
+    }
+
     public override void Update(float frameTime)
     {
         _updateAccumulator += TimeSpan.FromSeconds(frameTime);
@@ -116,7 +203,7 @@ public sealed class ThermalSignatureSystem : EntitySystem
             {
                 var xform = Transform(uid);
                 sigComp.TotalHeat = sigComp.StoredHeat;
-                if (xform.GridUid != null && _sigQuery.TryComp(xform.GridUid, out var gridSig))
+                if (xform.GridUid != null && SigQuery.TryComp(xform.GridUid, out var gridSig))
                     gridSig.TotalHeat += sigComp.StoredHeat;
             }
         }

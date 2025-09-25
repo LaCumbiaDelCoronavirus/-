@@ -225,6 +225,7 @@
   components:
   - type: ShuttleConsole
   - type: ShuttleConsoleLock
+  - type: TargetSeekable # Mono
   - type: ActivatableUI
     key: enum.ShuttleConsoleUiKey.Key
   - type: UserInterface

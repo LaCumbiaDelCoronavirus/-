@@ -12,6 +12,8 @@ namespace Content.Shared._Mono.Detection;
 /// </summary>
 public sealed class DetectionSystem : EntitySystem
 {
+    [Dependency] private readonly SharedThermalSignatureSystem _thermalSignatureSystem = default!;
+
     public DetectionLevel IsGridDetected(Entity<MapGridComponent?> grid, EntityUid byUid)
     {
         if (!Resolve(grid, ref grid.Comp))
@@ -27,7 +29,7 @@ public sealed class DetectionSystem : EntitySystem
         var visualSig = gridDiagonal;
         var visualRadius = visualSig * comp.VisualMultiplier;
 
-        var thermalSig = TryComp<ThermalSignatureComponent>(grid, out var sigComp) ? MathF.Max(sigComp.TotalHeat, 0f) : 0f;
+        var thermalSig = MathF.Max(_thermalSignatureSystem.GetSignature(grid.Owner), 0f);
         var thermalRadius = MathF.Sqrt(thermalSig) * comp.InfraredMultiplier;
 
         if (TryComp<DetectedAtRangeMultiplierComponent>(grid, out var compAt))

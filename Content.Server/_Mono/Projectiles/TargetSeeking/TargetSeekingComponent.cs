@@ -5,16 +5,39 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-using System.Numerics;
+using Robust.Shared.Map;
 
 namespace Content.Server._Mono.Projectiles.TargetSeeking;
 
 /// <summary>
-/// Component that allows a projectile to seek and track targets autonomously.
+/// Component that allows a projectile to seek and track thermal targets autonomously.
 /// </summary>
-[RegisterComponent]
+[RegisterComponent, AutoGenerateComponentPause]
 public sealed partial class TargetSeekingComponent : Component
 {
+    /// <summary>
+    /// The next time this seeker can look for a target.
+    /// </summary>
+    // The reason this is kept on component, and not a global update over all target-seekers,
+    // is because target-seekers are rather time sensitive. This way, it can update immediately
+    // when launching and still keep consistent with the cooldown.
+    [DataField, AutoPausedField]
+    public TimeSpan NextTargetAcquisitionAttempt = TimeSpan.MinValue;
+
+    /// <summary>
+    /// The influence of targets is decided by this equation: Q/d^this;
+    /// meaning, the higher this is, closer targets will be prioritised more than hotter targets.
+    /// </summary>
+    [DataField]
+    public float TargetDistanceScoringPower = 0.4f;
+
+    /// <summary>
+    /// Minimum thermal signature that a potential target may have.
+    /// </summary>
+    // shouldn't be 0, keep it a low and reasonable value to avoid doing excess calculations on a ton of things
+    [DataField]
+    public float ThermalSignatureThreshold = 224.9f; // mob's passive thermal signature is 225
+
     /// <summary>
     /// Maximum distance to search for potential targets.
     /// </summary>
@@ -34,10 +57,29 @@ public sealed partial class TargetSeekingComponent : Component
     public Angle? TurnRate = 100f;
 
     /// <summary>
-    /// The current target entity being tracked.
+    /// The score of the current target being seeked, as in from TargetSeekingSystem.GetTargetInfluence.
+    /// </summary>
+    [DataField]
+    public float? CurrentTargetScore;
+
+    /// <summary>
+    /// The current target entity being tracked, and positional offset from it.
     /// </summary>
     [DataField]
     public EntityUid? CurrentTarget;
+
+    /// <summary>
+    /// While tracking a target, is the missile allowed to switch to a different target?
+    /// </summary>
+    [DataField]
+    public bool CanLoseTarget = true;
+
+    /// <summary>
+    /// Incase of <see cref="CanLoseTarget"/>, must the new target have a higher thermal signature
+    /// than the current target, to be considered a potential new target? 
+    /// </summary>
+    [DataField]
+    public bool TargetingComparesThermalSignature = false;
 
     /// <summary>
     /// Tracking algorithm used for intercepting the target.
