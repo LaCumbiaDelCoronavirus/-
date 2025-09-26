@@ -3,7 +3,7 @@
   parent: WeaponTurretVespera
   id: WeaponTurretVesperaFlare
   name: ADMP-F-27 SEREN Rapid-Fire Pod
-  description: A model of the ADMP-27, fitted to fire thermal flares instead of rockets. Distracts missiles and other heat-seeking projectiles with intense thermal signatures. Has a delay after the last shot before they start recharging. Can be remotely activated or linked to a GCS.
+  description: A model of the ADMP-27, fitted to fire thermal flares instead of rockets. Distracts missiles and other heat-seeking projectiles with intense thermal signatures. Has a delay after the last shot before it can start recharging. Can be remotely activated or linked to a GCS.
   components:
   - type: Sprite
     sprite: _Mono/Objects/ShuttleWeapons/vespera.rsi
@@ -16,7 +16,7 @@
     startingCharge: 6000
   - type: Gun
     fireRate: 4.6
-    shootThermalSignature: 1400000 # ~1.2km if firing continuously
+    shootThermalSignature: 1440000 #1.2km if firing continuously
     projectileSpeed: 32
     soundGunshot:
       path: /Audio/Weapons/Guns/Gunshots/rocket_launcher.ogg
@@ -73,8 +73,8 @@
     lifetime: 25
   - type: TargetSeekable
   - type: ThermalSignature
-    storedHeat: 2000 # 750 metres, without any heat dissipated
-    heatDissipation: 0.8
+    storedHeat: 4900 # 70 metres, without any heat dissipated
+    heatDissipation: 0.95
   - type: PassiveThermalSignature
     signature: 1200 # 150 metres
   - type: AmbientSound

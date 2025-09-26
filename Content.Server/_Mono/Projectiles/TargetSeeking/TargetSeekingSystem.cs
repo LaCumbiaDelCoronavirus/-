@@ -193,6 +193,9 @@ public sealed class TargetSeekingSystem : EntitySystem
         However, if we can change targets and have to compare thermalsig, the new target must have a higher
         signature.
 
+        The abstraction from targets -> bodies exists so that a targetseekable's grid is targeted, instead
+        of its
+
         TODO: give every owned grid TargetSeekable instead of relying on shuttleconsoles?
         */
 
