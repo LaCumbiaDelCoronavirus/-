@@ -73,8 +73,8 @@
     lifetime: 25
   - type: TargetSeekable
   - type: ThermalSignature
-    storedHeat: 4900 # 70 metres, without any heat dissipated
-    heatDissipation: 0.95
+    storedHeat: 40000 # 200 metres, without any heat dissipated
+    heatDissipation: 0.98 # it despawns very quickly anyway
   - type: PassiveThermalSignature
     signature: 1200 # 150 metres
   - type: AmbientSound
