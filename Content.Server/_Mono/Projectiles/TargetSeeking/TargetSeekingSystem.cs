@@ -95,11 +95,14 @@ public sealed class TargetSeekingSystem : EntitySystem
     /// <summary>
     /// Sets a target-seeking projectile's <see cref="TargetSeekingComponent.CurrentTarget"/>, and raises
     /// the appropriate events. 
+    /// 
+    /// Also sets its <see cref="TargetSeekingComponent.CurrentTargetScore"/>, if the new <paramref name="targetUid"/>
+    /// and <paramref name="targetScore"/> are not null.
     /// </summary>
     // NOTE: In the future, someone could want to change this to separate whether `CurrentTarget` is null with whether the seeker is actually targeting something.
     //       If so, change this to take in whether the seeker should be targeting something, rather than whether the target exists.
     //       Then, you'd be free to set `CurrentTarget` without needing to use this function.. ideally.
-    public void SetSeekerTarget(Entity<TargetSeekingComponent> seekerEntity, EntityUid? targetUid, TransformComponent? seekerTransform = null)
+    public void SetSeekerTarget(Entity<TargetSeekingComponent> seekerEntity, EntityUid? targetUid, TransformComponent? seekerTransform = null, float? targetScore = null)
     {
         var (_, seekerComponent) = seekerEntity;
 
@@ -116,6 +119,7 @@ public sealed class TargetSeekingSystem : EntitySystem
         }
 
         seekerComponent.CurrentTarget = targetUid;
+        seekerComponent.CurrentTargetScore = targetUid.HasValue ? targetScore : null;
     }
 
     /// <summary>
@@ -243,7 +247,7 @@ public sealed class TargetSeekingSystem : EntitySystem
     /// Returns a score for how 'attractive' a target is to a target-seeker, depending on thermal signature and distance.
     /// </summary>
     [Pure]
-    private float GetTargetInfluence(in float thermalSignature, in float distance, in float power)
+    private static float GetTargetInfluence(in float thermalSignature, in float distance, in float power)
         => thermalSignature / (MathF.Pow(distance, power) + float.Epsilon);
 
     /// <summary>
@@ -284,7 +288,7 @@ public sealed class TargetSeekingSystem : EntitySystem
 
         // The uid of the entity that shot this missile/target-seeker.
         EntityUid? shooterUid = null;
-        if (TryComp<ProjectileComponent>(uid, out var projectile) &&
+        if (_projectileQuery.TryGetComponent(uid, out var projectile) &&
             TryComp(projectile.Shooter, out TransformComponent? shooterTransform))
             shooterUid = shooterTransform.GridUid ?? projectile.Shooter;
 
@@ -364,11 +368,8 @@ public sealed class TargetSeekingSystem : EntitySystem
         // Set our new target
         if (bestTarget.HasValue)
         {
-            component.CurrentTargetScore = bestScore;
-            component.CurrentTarget = bestTarget;
-            SetSeekerTarget((uid, component), bestTarget, transform);
-
-            Log.Debug($"Locked onto a target! {ToPrettyString(bestTarget.Value)}");
+            SetSeekerTarget((uid, component), bestTarget, transform, bestScore);
+            Log.Debug($"Locked onto a target! {ToPrettyString(bestTarget.Value)}, position: {validSignatureEntities[bestTarget.Value].Item1}, score: {bestScore}");
         }
     }
 

@@ -89,7 +89,7 @@
     launchSpeed: 25
     maxSpeed: 70
     trackDelay: 3
-    targetDistanceScoringPower: 0.8
+    targetDistanceScoringPower: 1
   # destructible components below
   - type: Damageable
     damageContainer: Inorganic

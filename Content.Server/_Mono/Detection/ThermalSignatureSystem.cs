@@ -14,6 +14,7 @@ using Content.Shared.Weapons.Ranged.Systems;
 using Robust.Server.GameObjects;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
+using Serilog;
 using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.CompilerServices;
@@ -103,7 +104,7 @@ public sealed class ThermalSignatureSystem : SharedThermalSignatureSystem
     ///     TODO: Remove this when on C# 13.0+
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)] // AIL is (probably?) fine because this is private and only used once.
-    private static void ApplyGridEmissions(Dictionary<Vector2i, float> grid, List<(Vector2i Coordinates, float Emission, EntityUid)> emissions, out Vector2i? hottestCell, out float lastHottest)
+    private /*static*/ void ApplyGridEmissions(Dictionary<Vector2i, float> grid, List<(Vector2i Coordinates, float Emission, EntityUid)> emissions, out Vector2i? hottestCell, out float lastHottest)
     {
         hottestCell = null;
         lastHottest = float.MinValue;
@@ -118,10 +119,11 @@ public sealed class ThermalSignatureSystem : SharedThermalSignatureSystem
             {
                 var heat = ThermalDistantialFalloff(signature, Vector2.DistanceSquared(gridCoordinates, otherCoordinates) * SignatureResolutionSq);
 
-                thisCellSignature += signature;
+                thisCellSignature += heat;
                 thisHeat += heat;
             }
 
+            Log.Debug($"Heat value at {gridCoordinates}: {thisCellSignature}");
             if (thisHeat > lastHottest)
             {
                 lastHottest = thisHeat;
@@ -163,6 +165,7 @@ public sealed class ThermalSignatureSystem : SharedThermalSignatureSystem
             yield break;
 
         var hottestCellSignature = grid[hottestCell.Value];
+        Log.Debug($"Got hottest cell! At {hottestCell}, with {hottestCellSignature}");
         foreach (var (cellCoordinates, _, uid) in emissions)
         {
             if (cellCoordinates == hottestCell)

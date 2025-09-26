@@ -29,13 +29,18 @@ public class SharedThermalSignatureSystem : EntitySystem
 
     /// <summary>
     ///     Returns a thermal signature's strength at a distance.
+    ///         If distance is at or below <see cref="float.Epsilon"/>,
+    ///         just returns the given <paramref name="signature"/>.
     /// </summary>
     [Pure]
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     protected static float ThermalDistantialFalloff(in float signature, in float distanceSq)
     {
+        if (distanceSq <= float.Epsilon)
+            return signature;
+
         var maxDistanceSq = signature; // sqrt(signature) is the real max radius of a thermalsig
-        return distanceSq < maxDistanceSq && distanceSq > float.Epsilon ?
+        return distanceSq < maxDistanceSq ?
             signature / distanceSq : // ISL
             0f;
     }
