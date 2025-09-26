@@ -1,14 +1,13 @@
 // SPDX-FileCopyrightText: 2025 Ark
 // SPDX-FileCopyrightText: 2025 Ilya246
+// SPDX-FileCopyrightText: 2025 LaCumbiaDelCoronavirus
 // SPDX-FileCopyrightText: 2025 Redrover1760
 // SPDX-FileCopyrightText: 2025 RikuTheKiller
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-using System.ComponentModel.DataAnnotations;
 using System.Numerics;
 using Content.Shared.Interaction;
-using Content.Server.Shuttles.Components;
 using Content.Shared.Projectiles;
 using Robust.Server.GameObjects;
 using Robust.Shared.Physics.Components;
@@ -17,12 +16,12 @@ using Content.Server._Mono.Detection;
 using JetBrains.Annotations;
 using Content.Shared._Mono.Detection;
 using Robust.Shared.Map;
-using System.Linq;
+using Robust.Shared.Utility;
 
 namespace Content.Server._Mono.Projectiles.TargetSeeking;
 
 /// <summary>
-/// Handles the logic for target-seeking projectiles.
+///     Handles the logic for target-seeking projectiles.
 /// </summary>
 public sealed class TargetSeekingSystem : EntitySystem
 {
@@ -31,6 +30,9 @@ public sealed class TargetSeekingSystem : EntitySystem
     [Dependency] private readonly PhysicsSystem _physics = null!;
     [Dependency] private readonly ThermalSignatureSystem _thermalSignatureSystem = null!;
     [Dependency] private readonly IGameTiming _gameTiming = default!; // Mono
+
+    private EntityQuery<ProjectileComponent> _projectileQuery;
+    private EntityQuery<PhysicsComponent> _physicsQuery;
 
     /// <summary>
     /// Minimum amount of time that must pass since the last attempt to acquire a target,
@@ -47,8 +49,73 @@ public sealed class TargetSeekingSystem : EntitySystem
     public override void Initialize()
     {
         base.Initialize();
+
+        _projectileQuery = GetEntityQuery<ProjectileComponent>();
+        _physicsQuery = GetEntityQuery<PhysicsComponent>();
+
         SubscribeLocalEvent<TargetSeekingComponent, ProjectileHitEvent>(OnProjectileHit);
         SubscribeLocalEvent<TargetSeekingComponent, EntParentChangedMessage>(OnParentChanged);
+
+        SubscribeLocalEvent<TargetSeekingComponent, ComponentShutdown>(OnTargetSeekingShutdown);
+    }
+
+    private void OnTargetSeekingShutdown(Entity<TargetSeekingComponent> seekerEntity, ref ComponentShutdown args)
+    {
+        if (seekerEntity.Comp.CurrentTarget is { } oldTargetEntity)
+            OnChangingSeekingTarget(seekerEntity, oldTargetEntity);
+    }
+
+    /// <summary>
+    /// Called on a seeker when its <see cref="TargetSeekingComponent.CurrentTarget"/> is changed, directed at the new target.
+    /// </summary>
+    private void OnStartingSeeking(Entity<TargetSeekingComponent, TransformComponent?> seekerTransformEntity, EntityUid newTargetUid)
+    {
+        if (!Resolve(seekerTransformEntity, ref seekerTransformEntity.Comp2))
+            return;
+
+        var startedSeekingEvent = new EntityStartedBeingSeekedTargetEvent(seekerTransformEntity!, seekerTransformEntity.Comp1.ExposesTracking);
+        RaiseLocalEvent(newTargetUid, ref startedSeekingEvent);
+    }
+
+    /// <summary>
+    /// Called on a seeker when it either loses or changes its <see cref="TargetSeekingComponent.CurrentTarget"/>, directed at the old target.
+    /// </summary>
+    private void OnChangingSeekingTarget(Entity<TargetSeekingComponent, TransformComponent?> seekerTransformEntity, EntityUid oldTargetUid)
+    {
+        if (!Resolve(seekerTransformEntity, ref seekerTransformEntity.Comp2))
+            return;
+
+        // because you shouldn't be calling this outside of SetSeekerTarget and OnTargetSeekingShutdown improperly
+        DebugTools.AssertNotNull(seekerTransformEntity.Comp1.CurrentTarget, "When raising EntityStoppedBeingSeekedTarget, CurrentTarget was already set to null!");
+
+        var changedSeekingEvent = new EntityStoppedBeingSeekedTargetEvent(seekerTransformEntity!, seekerTransformEntity.Comp1.ExposesTracking);
+        RaiseLocalEvent(oldTargetUid, ref changedSeekingEvent);
+    }
+
+    /// <summary>
+    /// Sets a target-seeking projectile's <see cref="TargetSeekingComponent.CurrentTarget"/>, and raises
+    /// the appropriate events. 
+    /// </summary>
+    // NOTE: In the future, someone could want to change this to separate whether `CurrentTarget` is null with whether the seeker is actually targeting something.
+    //       If so, change this to take in whether the seeker should be targeting something, rather than whether the target exists.
+    //       Then, you'd be free to set `CurrentTarget` without needing to use this function.. ideally.
+    public void SetSeekerTarget(Entity<TargetSeekingComponent> seekerEntity, EntityUid? targetUid, TransformComponent? seekerTransform = null)
+    {
+        var (_, seekerComponent) = seekerEntity;
+
+        // if the new target is different from the old target,
+        if (seekerComponent.CurrentTarget != targetUid)
+        {
+            // and we had an old target, then raise changing-seeking
+            if (seekerComponent.CurrentTarget is { } oldTargetUid)
+                OnChangingSeekingTarget((seekerEntity, seekerComponent, seekerTransform), oldTargetUid);
+
+            // and our new target isn't null, then raise starting-seeking
+            if (targetUid != null)
+                OnStartingSeeking((seekerEntity, seekerComponent, seekerTransform), targetUid.Value);
+        }
+
+        seekerComponent.CurrentTarget = targetUid;
     }
 
     /// <summary>
@@ -63,21 +130,21 @@ public sealed class TargetSeekingSystem : EntitySystem
         }
 
         // Reset the target since we've hit something
-        component.CurrentTarget = null;
+        SetSeekerTarget((uid, component), null);
     }
 
     /// <summary>
     /// Called when a target-seeking projectile changes parent (e.g., enters a grid).
     /// </summary>
-    private void OnParentChanged(EntityUid uid, TargetSeekingComponent component, EntParentChangedMessage args)
+    private void OnParentChanged(Entity<TargetSeekingComponent> seekerEntity, ref EntParentChangedMessage args)
     {
         // Check if the projectile has entered a grid
         if (args.Transform.GridUid == null)
             return;
 
         // Get the shooter's grid to compare
-        if (!TryComp<ProjectileComponent>(uid, out var projectile) ||
-            !TryComp<TransformComponent>(projectile.Shooter, out var shooterTransform))
+        if (!_projectileQuery.TryGetComponent(seekerEntity.Owner, out var projectile) ||
+            !TryComp(projectile.Shooter, out TransformComponent? shooterTransform))
             return;
 
         var shooterGridUid = shooterTransform.GridUid;
@@ -85,9 +152,7 @@ public sealed class TargetSeekingSystem : EntitySystem
 
         // If we've entered a different grid than the shooter's grid, disable seeking
         if (currentGridUid != shooterGridUid)
-        {
-            component.SeekingDisabled = true;
-        }
+            seekerEntity.Comp.SeekingDisabled = true;
     }
 
     public override void Update(float frameTime)
@@ -136,20 +201,20 @@ public sealed class TargetSeekingSystem : EntitySystem
             if (seekingComp.CurrentTarget.HasValue && !TerminatingOrDeleted(seekingComp.CurrentTarget))
             {
                 var target = seekingComp.CurrentTarget.Value;
+                if (!_physicsQuery.TryGetComponent(target, out var targetBody))
+                    continue;
+
                 var targetXform = Transform(target);
                 var wantAngle = new Angle(0);
-
-                var ourEnt = (uid, seekingComp, xform);
-                var targEnt = (target, targetXform);
 
                 switch (seekingComp.TrackingAlgorithm)
                 {
                     case TrackingMethod.Direct:
-                        wantAngle = ApplyDirectTracking(ourEnt, targEnt, frameTime); break;
+                        wantAngle = ApplyDirectTracking((uid, xform), (target, targetXform), frameTime); break;
                     case TrackingMethod.Predictive:
-                        wantAngle = ApplyPredictiveTracking(ourEnt, targEnt, frameTime); break;
+                        wantAngle = ApplyPredictiveTracking((uid, seekingComp, body, xform), (target, targetBody, targetXform), frameTime); break;
                     case TrackingMethod.AdvancedPredictive:
-                        wantAngle = ApplyAdvancedTracking(ourEnt, targEnt, frameTime); break;
+                        wantAngle = ApplyAdvancedTracking((uid, seekingComp, body, xform), (target, targetBody, targetXform), frameTime); break;
                 }
 
                 _rotateToFace.TryRotateTo(
@@ -301,6 +366,7 @@ public sealed class TargetSeekingSystem : EntitySystem
         {
             component.CurrentTargetScore = bestScore;
             component.CurrentTarget = bestTarget;
+            SetSeekerTarget((uid, component), bestTarget, transform);
 
             Log.Debug($"Locked onto a target! {ToPrettyString(bestTarget.Value)}");
         }
@@ -309,21 +375,18 @@ public sealed class TargetSeekingSystem : EntitySystem
     /// <summary>
     /// Advanced tracking that predicts where the target will be based on its velocity.
     /// </summary>
-    public Angle ApplyPredictiveTracking(Entity<TargetSeekingComponent, TransformComponent> ent, Entity<TransformComponent> target, float frameTime)
+    public Angle ApplyPredictiveTracking(Entity<TargetSeekingComponent, PhysicsComponent, TransformComponent> ent, Entity<PhysicsComponent, TransformComponent> target, float frameTime)
     {
-        if (!TryComp<PhysicsComponent>(target, out var targetBody) || !TryComp<PhysicsComponent>(ent, out var body))
-            return new Angle(0);
-
         // Get current positions
-        var currentTargetPosition = _transform.GetWorldPosition(target.Comp);
-        var sourcePosition = _transform.GetWorldPosition(ent.Comp2);
+        var currentTargetPosition = _transform.GetWorldPosition(target.Comp2);
+        var sourcePosition = _transform.GetWorldPosition(ent.Comp3);
 
         // Calculate current distance
         var toTargetVec = currentTargetPosition - sourcePosition;
         var currentDistance = toTargetVec.Length();
 
-        var targetVelocity = _physics.GetMapLinearVelocity(target, targetBody, target.Comp);
-        var ourVelocity = _physics.GetMapLinearVelocity(ent, body, ent.Comp2);
+        var targetVelocity = _physics.GetMapLinearVelocity(target, target.Comp1, target.Comp2);
+        var ourVelocity = _physics.GetMapLinearVelocity(ent, ent.Comp2, ent.Comp3);
         var relVel = ourVelocity - targetVelocity;
 
         // Calculate time to intercept (using closing rate)
@@ -347,19 +410,16 @@ public sealed class TargetSeekingSystem : EntitySystem
     /// Works best for missiles with low friction and high max speed, where they spend all or most of their lifetime accelerating and being under max speed.
     /// </summary>
     // see: https://github.com/Ilya246/orbitfight/blob/master/src/entities.cpp for original
-    public Angle ApplyAdvancedTracking(Entity<TargetSeekingComponent, TransformComponent> ent, Entity<TransformComponent> target, float frameTime)
+    public Angle ApplyAdvancedTracking(Entity<TargetSeekingComponent, PhysicsComponent, TransformComponent> ent, Entity<PhysicsComponent, TransformComponent> target, float frameTime)
     {
-        if (!TryComp<PhysicsComponent>(target, out var targetBody) || !TryComp<PhysicsComponent>(ent, out var body))
-            return new Angle(0);
-
         const int guidanceIterations = 3;
 
         var accel = ent.Comp1.Acceleration;
 
-        var ownVel = _physics.GetMapLinearVelocity(ent);
-        var ownPos = _transform.GetWorldPosition(ent.Comp2);
-        var targetVel = _physics.GetMapLinearVelocity(target);
-        var targetPos = _transform.GetWorldPosition(target.Comp);
+        var ownVel = _physics.GetMapLinearVelocity(ent, ent.Comp2, ent.Comp3);
+        var ownPos = _transform.GetWorldPosition(ent.Comp3);
+        var targetVel = _physics.GetMapLinearVelocity(target, target.Comp1, target.Comp2);
+        var targetPos = _transform.GetWorldPosition(target.Comp2);
         var relVel = targetVel - ownVel;
         var relPos = targetPos - ownPos;
 
@@ -392,10 +452,10 @@ public sealed class TargetSeekingSystem : EntitySystem
     /// <summary>
     /// Basic tracking that points directly at the current target position.
     /// </summary>
-    public Angle ApplyDirectTracking(Entity<TargetSeekingComponent, TransformComponent> ent, Entity<TransformComponent> target, float frameTime)
+    public Angle ApplyDirectTracking(Entity<TransformComponent> ent, Entity<TransformComponent> target, float frameTime)
     {
         // Get the angle directly toward the target
-        var angleToTarget = (_transform.GetWorldPosition(target.Comp) - _transform.GetWorldPosition(ent.Comp2)).ToWorldAngle();
+        var angleToTarget = (_transform.GetWorldPosition(target.Comp) - _transform.GetWorldPosition(ent.Comp)).ToWorldAngle();
 
         return angleToTarget;
     }
