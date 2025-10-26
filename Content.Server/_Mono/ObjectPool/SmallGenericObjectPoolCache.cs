@@ -1,9 +1,8 @@
-using System.Collections;
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.ObjectPool;
 
-namespace Content.Shared._Mono.ObjectPool;
-/*
+namespace Content.Server._Mono.ObjectPool;
+
 /// <summary>
 ///     ObjectPool cache for generic types. This caches every individual
 ///         type you give it, so it really should not be used with that many
@@ -24,4 +23,3 @@ public static class SmallGenericObjectPoolCache<T> where T : class, new()
         Shared.Return(obj);
     }
 }
-*/

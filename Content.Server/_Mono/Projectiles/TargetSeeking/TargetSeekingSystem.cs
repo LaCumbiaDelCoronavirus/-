@@ -15,7 +15,6 @@ using Robust.Shared.Timing;
 using Content.Server._Mono.Detection;
 using JetBrains.Annotations;
 using Content.Shared._Mono.Detection;
-using Robust.Shared.Map;
 using Robust.Shared.Utility;
 
 namespace Content.Server._Mono.Projectiles.TargetSeeking;
@@ -93,7 +92,7 @@ public sealed class TargetSeekingSystem : EntitySystem
             */
 
             var bodyUid = targetTransformComponent.GridUid ?? targetUid;
-            var bodyEntity = new Entity<TransformComponent>(targetUid, targetTransformComponent);
+            var bodyEntity = new Entity<TransformComponent>(bodyUid, bodyUid == targetUid ? targetTransformComponent : Transform(bodyUid));
 
             if (_validTargetableEntities.ContainsKey(bodyEntity))
                 continue;
@@ -283,7 +282,7 @@ public sealed class TargetSeekingSystem : EntitySystem
 
         // Get the shooter's grid to compare
         if (!_projectileQuery.TryGetComponent(seekerEntity.Owner, out var projectile) ||
-            !TryComp(projectile.Shooter, out TransformComponent? shooterTransform))
+            !EntityManager.TransformQuery.TryComp(projectile.Shooter, out var shooterTransform))
             return;
 
         var shooterGridUid = shooterTransform.GridUid;
@@ -307,6 +306,10 @@ public sealed class TargetSeekingSystem : EntitySystem
     /// <remarks>
     /// Not thread-safe, dont even think about it.
     /// </remarks>
+    /*
+        Also this method doesn't really care about target grids possibly taking up more than one grid
+            of space. Lol.
+    */
     public void AcquireTarget(in Entity<TargetSeekingComponent, TransformComponent> seekerEntity)
     {
         var (seekerUid, seekerComponent, seekerTransform) = seekerEntity;
@@ -330,13 +333,14 @@ public sealed class TargetSeekingSystem : EntitySystem
             minimumRequiredSignature = SharedThermalSignatureSystem.SignatureZeroEpsilon;
 
         var sourcePos = _transform.GetWorldPosition(seekerTransform);
+        var currentRotation = _transform.GetWorldRotation(seekerTransform);
 
         var detectionRangeSquared = seekerComponent.DetectionRange * seekerComponent.DetectionRange;
 
         // for targets that we may actually lock on to
         var strictScanAngle = seekerComponent.ScanArc / 2;
         // for targets that will contribute to the heatmap, but we won't lock onto
-        var lenientScanAngle = strictScanAngle * 1.5f;
+        var lenientScanAngle = strictScanAngle * 1.75f;
 
         // get intermediate targets
         foreach (var ((targetUid, targetTransform), (entityWorldCoordinates, entitySignature)) in _validTargetableEntities)
@@ -355,11 +359,8 @@ public sealed class TargetSeekingSystem : EntitySystem
             if (deltaLengthSq > detectionRangeSquared)
                 continue;
 
-            var angleToTarget = delta.ToWorldAngle();
-            var currentRotation = _transform.GetWorldRotation(targetTransform);
-
             // Check if target is within field of view
-            var angleDifference = MathF.Abs((float)Angle.ShortestDistance(currentRotation, angleToTarget).Degrees);
+            var angleDifference = MathF.Abs((float)Angle.ShortestDistance(currentRotation, delta.ToWorldAngle()).Degrees);
             if (angleDifference > lenientScanAngle)
                 continue; // Target is outside of lenient scanangle
 

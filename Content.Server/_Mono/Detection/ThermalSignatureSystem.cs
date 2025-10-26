@@ -2,10 +2,10 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
+using Content.Server._Mono.ObjectPool;
 using Content.Server.Power.Components;
 using Content.Server.Shuttles.Components;
 using Content.Shared._Mono.Detection;
-using Content.Shared._Mono.ObjectPool;
 using Content.Shared._Mono.Ships;
 using Content.Shared.Power.EntitySystems;
 using Content.Shared.Shuttles.Components;
@@ -19,7 +19,6 @@ using Robust.Shared.Utility;
 using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 using DependencyAttribute = Robust.Shared.IoC.DependencyAttribute;
 
 namespace Content.Server._Mono.Detection;
@@ -107,7 +106,7 @@ public sealed class ThermalSignatureSystem : SharedThermalSignatureSystem
     ///     TODO: Remove this when on C# 13.0+
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)] // AIL is (probably?) fine because this is private and only used once.
-    private static void ApplyGridEmissions<TEntityValue, TPassedData>(Dictionary<Vector2i, float> grid, ValueList<(Vector2i Coordinates, float Emission, TEntityValue, TPassedData?)> emissions, out Vector2i? hottestCell, out float lastHottest) where TEntityValue : notnull
+    private void ApplyGridEmissions<TEntityValue, TPassedData>(Dictionary<Vector2i, float> grid, in ValueList<(Vector2i Coordinates, float Emission, TEntityValue, TPassedData?)> emissions, out Vector2i? hottestCell, out float lastHottest) where TEntityValue : notnull
     {
         hottestCell = null;
         lastHottest = float.MinValue;
@@ -115,21 +114,20 @@ public sealed class ThermalSignatureSystem : SharedThermalSignatureSystem
         // go through each grid cell, and for each cell go through every thermal signature and apply it's heat to this one
         foreach (var (gridCoordinates, _) in grid)
         {
-            var thisHeat = 0f;
-            ref var thisCellSignature = ref CollectionsMarshal.GetValueRefOrNullRef(grid, gridCoordinates);
-
+            var thisCellSignature = 0f;
             foreach (var (otherCoordinates, signature, _, _) in emissions)
             {
                 var heat = ThermalDistantialFalloff(signature, Vector2.DistanceSquared(gridCoordinates, otherCoordinates) * SignatureResolutionSq);
-
                 thisCellSignature += heat;
-                thisHeat += heat;
             }
 
-            if (thisHeat > lastHottest)
+            Log.Debug($"Grid at {gridCoordinates}, emission at {thisCellSignature}");
+
+            grid[gridCoordinates] = thisCellSignature;
+            if (thisCellSignature > lastHottest)
             {
-                lastHottest = thisHeat;
                 hottestCell = gridCoordinates;
+                lastHottest = thisCellSignature;
             }
         }
     }
@@ -144,13 +142,9 @@ public sealed class ThermalSignatureSystem : SharedThermalSignatureSystem
     {
         _stopwatch.Restart();
 
-        // now this is how you troll the gc
-
         // cell position: total heat in that cell
         var grid = _gridMatrixPool.Get();
-
-        //var emissions = SmallGenericObjectPoolCache<List<(Vector2i Coordinates, float Emission, TEntityValue, TPassedData?)>>.Get();
-        var emissions = new ValueList<(Vector2i Coordinates, float Emission, TEntityValue, TPassedData?)>();
+        var emissions = new ValueList<(Vector2i Coordinates, float Emission, TEntityValue, TPassedData?)>(entities.Count);
 
         /// curse of 220 foreaches
         // map out emissions, initialise the grid (as we only process cells with signatures in them)
@@ -169,9 +163,6 @@ public sealed class ThermalSignatureSystem : SharedThermalSignatureSystem
 
         if (lastHottest <= float.MinValue || hottestCell == null)
         {
-            //emissions.Clear();
-            //mallGenericObjectPoolCache<List<(Vector2i Coordinates, float Emission, TEntityValue, TPassedData?)>>.Return(emissions);
-
             grid.Clear();
             _gridMatrixPool.Return(grid);
 
@@ -185,9 +176,6 @@ public sealed class ThermalSignatureSystem : SharedThermalSignatureSystem
             if (cellCoordinates == hottestCell)
                 yield return (entityValue, hottestCellSignature, data);
         }
-
-        //emissions.Clear();
-        //SmallGenericObjectPoolCache<List<(Vector2i Coordinates, float Emission, TEntityValue, TPassedData?)>>.Return(emissions);
 
         grid.Clear();
         _gridMatrixPool.Return(grid);
