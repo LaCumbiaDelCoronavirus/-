@@ -41,10 +41,22 @@ public sealed class TargetSeekingSystem : EntitySystem
     private static readonly TimeSpan SeekerTargetAcquisitionInterval = TimeSpan.FromSeconds(0.5);
 
     /// <summary>
+    /// Minimum amount of time that must pass since the last time a seeker locked a target,
+    /// for it to lock onto another target.
+    /// </summary>
+    private static readonly TimeSpan SeekerTargetLockInterval = TimeSpan.FromSeconds(0.5);
+
+    /// <summary>
     /// How many potential targets can we have in <see cref="AcquireTarget"/> before
     /// stopping looking for any new ones? 
     /// </summary>
-    private const int MaximumPotentialTargets = 120;
+    private const int MaximumPotentialTargets = 300;
+
+    // entity: heat-signature+position
+    /// <summary>
+    /// Entities that will all seekers will try and lock onto.
+    /// </summary>
+    private readonly Dictionary<Entity<TransformComponent>, (MapCoordinates, float)> _validTargetableEntities = new();
 
     public override void Initialize()
     {
@@ -57,6 +69,128 @@ public sealed class TargetSeekingSystem : EntitySystem
         SubscribeLocalEvent<TargetSeekingComponent, EntParentChangedMessage>(OnParentChanged);
 
         SubscribeLocalEvent<TargetSeekingComponent, ComponentShutdown>(OnTargetSeekingShutdown);
+    }
+
+    private void UpdateTargetableEntities()
+    {
+        /*
+        TODO: give every owned grid TargetSeekable instead of relying on shuttleconsoles?
+
+        The abstraction from targets -> bodies exists so that a targetseekable's grid is targeted, instead
+        of its shuttleconsole etc to save processing.
+        */
+
+        _validTargetableEntities.Clear();
+        var targetQuery = EntityQueryEnumerator<TargetSeekableComponent, TransformComponent>();
+
+        // The uid of the entity that shot this missile/target-seeker.
+        while (targetQuery.MoveNext(out var targetUid, out _, out var targetTransformComponent))
+        {
+            /*
+            The body can either be a seekable target, or it's grid.
+            If the target has a grid, use that as the body.
+
+            Ignore this body if it's our current target, or is the body that launched us.
+            */
+
+            var bodyUid = targetTransformComponent.GridUid ?? targetUid;
+            var bodyEntity = new Entity<TransformComponent>(targetUid, targetTransformComponent);
+
+            if (_validTargetableEntities.ContainsKey(bodyEntity))
+                continue;
+
+            var targetMapCoordinates = _transform.GetMapCoordinates(targetTransformComponent);
+
+            _validTargetableEntities[bodyEntity] = (targetMapCoordinates, _thermalSignatureSystem.GetSignature(bodyUid));
+
+            // just stop
+            if (_validTargetableEntities.Count > MaximumPotentialTargets)
+                break;
+        }
+    }
+
+    public override void Update(float frameTime)
+    {
+        base.Update(frameTime);
+
+        var ticktime = _gameTiming.TickPeriod;
+
+        var query = EntityQueryEnumerator<TargetSeekingComponent, PhysicsComponent, TransformComponent>();
+        while (query.MoveNext(out var uid, out var seekingComp, out var body, out var xform))
+        {
+            var acceleration = seekingComp.Acceleration * frameTime;
+            // Initialize launch speed.
+            if (seekingComp.Launched == false)
+            {
+                acceleration += seekingComp.LaunchSpeed;
+                seekingComp.Launched = true;
+            }
+
+            // Apply acceleration in the direction the projectile is facing
+            _physics.SetLinearVelocity(uid, body.LinearVelocity + _transform.GetWorldRotation(xform).ToWorldVec() * acceleration, body: body);
+
+            // Damping applied for missiles above max speed.
+            if (body.LinearVelocity.Length() > seekingComp.MaxSpeed)
+                _physics.SetLinearDamping(uid, body, seekingComp.Acceleration * (float)ticktime.TotalSeconds * 1.5f);
+            else
+            {
+                _physics.SetLinearDamping(uid, body, 0f);
+            }
+
+            // Skip seeking behavior if disabled (e.g., after entering an enemy grid)
+            if (seekingComp.SeekingDisabled)
+                continue;
+
+            if (seekingComp.TrackDelay > 0f)
+            {
+                seekingComp.TrackDelay -= frameTime;
+                continue;
+            }
+
+            // Whether we should try and look for a new target.
+            // If we can lose our target, then always try to find a new one.
+            var tryGetTarget = seekingComp.CanLoseTarget;
+
+            // If we have a target, track it using the selected algorithm
+            if (seekingComp.CurrentTarget.HasValue && !TerminatingOrDeleted(seekingComp.CurrentTarget))
+            {
+                var target = seekingComp.CurrentTarget.Value;
+                if (!_physicsQuery.TryGetComponent(target, out var targetBody))
+                    continue;
+
+                var targetXform = Transform(target);
+                var wantAngle = new Angle(0);
+
+                switch (seekingComp.TrackingAlgorithm)
+                {
+                    case TrackingMethod.Direct:
+                        wantAngle = ApplyDirectTracking((uid, xform), (target, targetXform), frameTime); break;
+                    case TrackingMethod.Predictive:
+                        wantAngle = ApplyPredictiveTracking((uid, seekingComp, body, xform), (target, targetBody, targetXform), frameTime); break;
+                    case TrackingMethod.AdvancedPredictive:
+                        wantAngle = ApplyAdvancedTracking((uid, seekingComp, body, xform), (target, targetBody, targetXform), frameTime); break;
+                }
+
+                _rotateToFace.TryRotateTo(
+                    uid,
+                    wantAngle,
+                    frameTime,
+                    seekingComp.Tolerance,
+                    seekingComp.TurnRate?.Theta ?? MathF.PI * 2,
+                    xform
+                );
+            }
+            else // if we don't have a target, try and get one
+                tryGetTarget = true;
+
+            if (tryGetTarget &&
+                _gameTiming.CurTime > seekingComp.NextTargetLock)
+            {
+                // Its time to find and kill
+                AcquireTarget(uid, seekingComp, xform);
+                seekingComp.NextTargetLock = _gameTiming.CurTime + SeekerTargetAcquisitionInterval;
+            }
+        }
     }
 
     private void OnTargetSeekingShutdown(Entity<TargetSeekingComponent> seekerEntity, ref ComponentShutdown args)
@@ -159,90 +293,6 @@ public sealed class TargetSeekingSystem : EntitySystem
             seekerEntity.Comp.SeekingDisabled = true;
     }
 
-    public override void Update(float frameTime)
-    {
-        base.Update(frameTime);
-
-        var ticktime = _gameTiming.TickPeriod;
-
-        var query = EntityQueryEnumerator<TargetSeekingComponent, PhysicsComponent, TransformComponent>();
-        while (query.MoveNext(out var uid, out var seekingComp, out var body, out var xform))
-        {
-            var acceleration = seekingComp.Acceleration * frameTime;
-            // Initialize launch speed.
-            if (seekingComp.Launched == false)
-            {
-                acceleration += seekingComp.LaunchSpeed;
-                seekingComp.Launched = true;
-            }
-
-            // Apply acceleration in the direction the projectile is facing
-            _physics.SetLinearVelocity(uid, body.LinearVelocity + _transform.GetWorldRotation(xform).ToWorldVec() * acceleration, body: body);
-
-            // Damping applied for missiles above max speed.
-            if (body.LinearVelocity.Length() > seekingComp.MaxSpeed)
-                _physics.SetLinearDamping(uid, body, seekingComp.Acceleration * (float)ticktime.TotalSeconds * 1.5f);
-            else
-            {
-                _physics.SetLinearDamping(uid, body, 0f);
-            }
-
-            // Skip seeking behavior if disabled (e.g., after entering an enemy grid)
-            if (seekingComp.SeekingDisabled)
-                continue;
-
-            if (seekingComp.TrackDelay > 0f)
-            {
-                seekingComp.TrackDelay -= frameTime;
-                continue;
-            }
-
-            // Whether we should try and look for a new target.
-            // If we can lose our target, then always try to find a new one.
-            var tryGetTarget = seekingComp.CanLoseTarget;
-
-            // If we have a target, track it using the selected algorithm
-            if (seekingComp.CurrentTarget.HasValue && !TerminatingOrDeleted(seekingComp.CurrentTarget))
-            {
-                var target = seekingComp.CurrentTarget.Value;
-                if (!_physicsQuery.TryGetComponent(target, out var targetBody))
-                    continue;
-
-                var targetXform = Transform(target);
-                var wantAngle = new Angle(0);
-
-                switch (seekingComp.TrackingAlgorithm)
-                {
-                    case TrackingMethod.Direct:
-                        wantAngle = ApplyDirectTracking((uid, xform), (target, targetXform), frameTime); break;
-                    case TrackingMethod.Predictive:
-                        wantAngle = ApplyPredictiveTracking((uid, seekingComp, body, xform), (target, targetBody, targetXform), frameTime); break;
-                    case TrackingMethod.AdvancedPredictive:
-                        wantAngle = ApplyAdvancedTracking((uid, seekingComp, body, xform), (target, targetBody, targetXform), frameTime); break;
-                }
-
-                _rotateToFace.TryRotateTo(
-                    uid,
-                    wantAngle,
-                    frameTime,
-                    seekingComp.Tolerance,
-                    seekingComp.TurnRate?.Theta ?? MathF.PI * 2,
-                    xform
-                );
-            }
-            else // if we don't have a target, try and get one
-                tryGetTarget = true;
-
-            if (tryGetTarget &&
-                _gameTiming.CurTime > seekingComp.NextTargetAcquisitionAttempt)
-            {
-                // Its time to find and kill
-                AcquireTarget(uid, seekingComp, xform);
-                seekingComp.NextTargetAcquisitionAttempt = _gameTiming.CurTime + SeekerTargetAcquisitionInterval;
-            }
-        }
-    }
-
     /// <summary>
     /// Returns a score for how 'attractive' a target is to a target-seeker, depending on thermal signature and distance.
     /// </summary>
@@ -255,18 +305,13 @@ public sealed class TargetSeekingSystem : EntitySystem
     /// </summary>
     public void AcquireTarget(EntityUid uid, TargetSeekingComponent component, TransformComponent transform)
     {
-        // this method is a tutorial on how to troll the gc
         /*
         Normally, the required threshold for a target to be considered is our ThermalSignatureThreshold.
 
         However, if we can change targets and have to compare thermalsig, the new target must have a higher
         signature.
-
-        The abstraction from targets -> bodies exists so that a targetseekable's grid is targeted, instead
-        of its
-
-        TODO: give every owned grid TargetSeekable instead of relying on shuttleconsoles?
         */
+        // this method is a tutorial on how to troll the gc
 
         // Are we allowed to replace our current target with a new one?
         var canRealisticallyLoseTarget = component.CurrentTarget.HasValue;
@@ -278,56 +323,10 @@ public sealed class TargetSeekingSystem : EntitySystem
         if (minimumRequiredSignature < SharedThermalSignatureSystem.SignatureZeroEpsilon)
             minimumRequiredSignature = SharedThermalSignatureSystem.SignatureZeroEpsilon;
 
-        // entity: heat-signature+position
-        var validSignatureEntities = new Dictionary<EntityUid, (MapCoordinates, float)>();
-
         var targetQuery = EntityQueryEnumerator<TargetSeekableComponent, TransformComponent>();
         var sourcePos = _transform.ToMapCoordinates(transform.Coordinates).Position;
 
         var detectionRangeSquared = component.DetectionRange * component.DetectionRange;
-
-        // The uid of the entity that shot this missile/target-seeker.
-        EntityUid? shooterUid = null;
-        if (_projectileQuery.TryGetComponent(uid, out var projectile) &&
-            TryComp(projectile.Shooter, out TransformComponent? shooterTransform))
-            shooterUid = shooterTransform.GridUid ?? projectile.Shooter;
-
-        while (targetQuery.MoveNext(out var targetUid, out _, out var targetTransformComponent))
-        {
-            if (targetTransformComponent.MapID != transform.MapID)
-                continue;
-
-            /*
-            The body can either be a seekable target, or it's grid.
-            If the target has a grid, use that as the body.
-
-            Ignore this body if it's our current target, or is the body that launched us.
-            */
-
-            var bodyUid = targetTransformComponent.GridUid ?? targetUid;
-            if (bodyUid == component.CurrentTarget || // dont target our current target
-                bodyUid == shooterUid || // dont target ourself
-                validSignatureEntities.ContainsKey(bodyUid))
-                continue;
-
-            var bodySignature = _thermalSignatureSystem.GetSignature(bodyUid);
-            if (bodySignature < minimumRequiredSignature)
-                continue;
-
-            var targetMapCoordinates = _transform.GetMapCoordinates(targetTransformComponent);
-            // out of sight, out of mind
-            if (Vector2.DistanceSquared(targetMapCoordinates.Position, sourcePos) > detectionRangeSquared)
-                continue;
-
-            validSignatureEntities[bodyUid] = (targetMapCoordinates, bodySignature);
-
-            // just stop
-            if (validSignatureEntities.Count > MaximumPotentialTargets)
-                break;
-        }
-
-        if (validSignatureEntities.Count == 0)
-            return;
 
         // get the strongest-signature group of entities
         var bestSignatures = _thermalSignatureSystem.SolveSignatureCollections(validSignatureEntities);

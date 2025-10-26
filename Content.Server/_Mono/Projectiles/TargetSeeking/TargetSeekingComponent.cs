@@ -15,13 +15,10 @@ namespace Content.Server._Mono.Projectiles.TargetSeeking;
 public sealed partial class TargetSeekingComponent : Component
 {
     /// <summary>
-    /// The next time this seeker can look for a target.
+    /// The next time this seeker locks onto a target.
     /// </summary>
-    // The reason this is kept on component, and not a global update over all target-seekers,
-    // is because target-seekers are rather time sensitive. This way, it can update immediately
-    // when launching and still keep consistent with the cooldown.
     [DataField, AutoPausedField]
-    public TimeSpan NextTargetAcquisitionAttempt = TimeSpan.MinValue;
+    public TimeSpan NextTargetLock = TimeSpan.MinValue;
 
     /// <summary>
     /// The influence of targets is decided by this equation: Q/d^this;
