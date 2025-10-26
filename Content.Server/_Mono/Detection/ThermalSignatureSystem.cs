@@ -5,16 +5,17 @@
 using Content.Server.Power.Components;
 using Content.Server.Shuttles.Components;
 using Content.Shared._Mono.Detection;
+using Content.Shared._Mono.ObjectPool;
 using Content.Shared._Mono.Ships;
 using Content.Shared.Power.EntitySystems;
 using Content.Shared.Shuttles.Components;
 using Content.Shared.Shuttles.Systems;
 using Content.Shared.Weapons.Ranged.Components;
 using Content.Shared.Weapons.Ranged.Systems;
-using Robust.Server.GameObjects;
-using Robust.Shared.Map;
+using Microsoft.Extensions.ObjectPool;
+using Robust.Shared.Collections;
 using Robust.Shared.Map.Components;
-using Serilog;
+using Robust.Shared.Utility;
 using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.CompilerServices;
@@ -29,7 +30,9 @@ namespace Content.Server._Mono.Detection;
 public sealed class ThermalSignatureSystem : SharedThermalSignatureSystem
 {
     [Dependency] private readonly SharedPowerReceiverSystem _power = default!;
-    [Dependency] private readonly TransformSystem _transformSystem = default!;
+
+    private readonly ObjectPool<Dictionary<Vector2i, float>> _gridMatrixPool =
+        new DefaultObjectPool<Dictionary<Vector2i, float>>(new DictPolicy<Vector2i, float>());
 
     private readonly Stopwatch _stopwatch = new();
     private TimeSpan _updateInterval = TimeSpan.FromSeconds(0.5);
@@ -100,11 +103,11 @@ public sealed class ThermalSignatureSystem : SharedThermalSignatureSystem
     /// <summary>
     ///     Applys the heat of thermal signatures to surrounding cells where possible.
     /// 
-    ///     This is done because "feature `ref and unsafe in async and iterator methods` is not available in C# 12.0."
+    ///     This is separated into another method because "feature `ref and unsafe in async and iterator methods` is not available in C# 12.0."
     ///     TODO: Remove this when on C# 13.0+
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)] // AIL is (probably?) fine because this is private and only used once.
-    private /*static*/ void ApplyGridEmissions(Dictionary<Vector2i, float> grid, List<(Vector2i Coordinates, float Emission, EntityUid)> emissions, out Vector2i? hottestCell, out float lastHottest)
+    private static void ApplyGridEmissions<TEntityValue, TPassedData>(Dictionary<Vector2i, float> grid, ValueList<(Vector2i Coordinates, float Emission, TEntityValue, TPassedData?)> emissions, out Vector2i? hottestCell, out float lastHottest) where TEntityValue : notnull
     {
         hottestCell = null;
         lastHottest = float.MinValue;
@@ -115,7 +118,7 @@ public sealed class ThermalSignatureSystem : SharedThermalSignatureSystem
             var thisHeat = 0f;
             ref var thisCellSignature = ref CollectionsMarshal.GetValueRefOrNullRef(grid, gridCoordinates);
 
-            foreach (var (otherCoordinates, signature, _) in emissions)
+            foreach (var (otherCoordinates, signature, _, _) in emissions)
             {
                 var heat = ThermalDistantialFalloff(signature, Vector2.DistanceSquared(gridCoordinates, otherCoordinates) * SignatureResolutionSq);
 
@@ -123,7 +126,6 @@ public sealed class ThermalSignatureSystem : SharedThermalSignatureSystem
                 thisHeat += heat;
             }
 
-            Log.Debug($"Heat value at {gridCoordinates}: {thisCellSignature}");
             if (thisHeat > lastHottest)
             {
                 lastHottest = thisHeat;
@@ -138,41 +140,57 @@ public sealed class ThermalSignatureSystem : SharedThermalSignatureSystem
     /// 
     ///     Only cells that have thermal signatures in them are modelled.
     /// </summary>
-    public IEnumerable<(EntityUid, float Signature)> SolveSignatureCollections(Dictionary<EntityUid, (MapCoordinates Coordinates, float Signature)> entities)
+    public IEnumerable<(TEntityValue, float Signature, TPassedData?)> SolveSignatureCollections<TEntityValue, TPassedData>(Dictionary<TEntityValue, (Vector2 Coordinates, float Signature, TPassedData?)> entities) where TEntityValue : notnull
     {
         _stopwatch.Restart();
 
+        // now this is how you troll the gc
+
         // cell position: total heat in that cell
-        var grid = new Dictionary<Vector2i, float>();
-        // list of every emission with the cell it's in, with it's cell coordinates
-        var emissions = new List<(Vector2i Coordinates, float Emission, EntityUid)>(entities.Count);
+        var grid = _gridMatrixPool.Get();
+
+        //var emissions = SmallGenericObjectPoolCache<List<(Vector2i Coordinates, float Emission, TEntityValue, TPassedData?)>>.Get();
+        var emissions = new ValueList<(Vector2i Coordinates, float Emission, TEntityValue, TPassedData?)>();
 
         /// curse of 220 foreaches
         // map out emissions, initialise the grid (as we only process cells with signatures in them)
-        foreach (var (uid, (coordinates, signature)) in entities)
+        foreach (var (entityValue, (coordinates, signature, data)) in entities)
         {
             // the cell that this signature is in
             var cellCoordinates = new Vector2i((int)MathF.Floor(coordinates.X / SignatureResolution), (int)MathF.Floor(coordinates.Y / SignatureResolution));
             grid[cellCoordinates] = default;
 
-            emissions.Add((cellCoordinates, signature, uid));
+            emissions.Add((cellCoordinates, signature, entityValue, data));
         }
 
         // distribute heat across cells
         ApplyGridEmissions(grid, emissions, out var hottestCell, out var lastHottest);
+        Log.Debug($"Took {_stopwatch.Elapsed.TotalMilliseconds}ms to process {entities.Count} signatures.");
 
         if (lastHottest <= float.MinValue || hottestCell == null)
+        {
+            //emissions.Clear();
+            //mallGenericObjectPoolCache<List<(Vector2i Coordinates, float Emission, TEntityValue, TPassedData?)>>.Return(emissions);
+
+            grid.Clear();
+            _gridMatrixPool.Return(grid);
+
             yield break;
+        }
 
         var hottestCellSignature = grid[hottestCell.Value];
         Log.Debug($"Got hottest cell! At {hottestCell}, with {hottestCellSignature}");
-        foreach (var (cellCoordinates, _, uid) in emissions)
+        foreach (var (cellCoordinates, _, entityValue, data) in emissions)
         {
             if (cellCoordinates == hottestCell)
-                yield return (uid, hottestCellSignature);
+                yield return (entityValue, hottestCellSignature, data);
         }
 
-        Log.Debug($"Took {_stopwatch.Elapsed.TotalMilliseconds}ms to process {entities.Count} signatures.");
+        //emissions.Clear();
+        //SmallGenericObjectPoolCache<List<(Vector2i Coordinates, float Emission, TEntityValue, TPassedData?)>>.Return(emissions);
+
+        grid.Clear();
+        _gridMatrixPool.Return(grid);
     }
 
     public override void Update(float frameTime)

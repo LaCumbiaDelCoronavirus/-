@@ -34,11 +34,7 @@ public sealed class TargetSeekingSystem : EntitySystem
     private EntityQuery<ProjectileComponent> _projectileQuery;
     private EntityQuery<PhysicsComponent> _physicsQuery;
 
-    /// <summary>
-    /// Minimum amount of time that must pass since the last attempt to acquire a target,
-    /// before trying to acquire a target again.
-    /// </summary>
-    private static readonly TimeSpan SeekerTargetAcquisitionInterval = TimeSpan.FromSeconds(0.5);
+    private static readonly TimeSpan SeekerTargetQueryInterval = TimeSpan.FromSeconds(0.5);
 
     /// <summary>
     /// Minimum amount of time that must pass since the last time a seeker locked a target,
@@ -50,13 +46,16 @@ public sealed class TargetSeekingSystem : EntitySystem
     /// How many potential targets can we have in <see cref="AcquireTarget"/> before
     /// stopping looking for any new ones? 
     /// </summary>
-    private const int MaximumPotentialTargets = 300;
+    private const int MaximumPotentialTargets = 250;
+
+    private static TimeSpan _nextSeekerTargetQuery = TimeSpan.MinValue;
 
     // entity: heat-signature+position
     /// <summary>
-    /// Entities that will all seekers will try and lock onto.
+    /// Bodies that will all seekers will try and lock onto.
+    /// Made up of only grids and gridless entities.
     /// </summary>
-    private readonly Dictionary<Entity<TransformComponent>, (MapCoordinates, float)> _validTargetableEntities = new();
+    private readonly Dictionary<Entity<TransformComponent>, (Vector2, float)> _validTargetableEntities = new();
 
     public override void Initialize()
     {
@@ -71,7 +70,7 @@ public sealed class TargetSeekingSystem : EntitySystem
         SubscribeLocalEvent<TargetSeekingComponent, ComponentShutdown>(OnTargetSeekingShutdown);
     }
 
-    private void UpdateTargetableEntities()
+    private void RequeryTargetableEntities()
     {
         /*
         TODO: give every owned grid TargetSeekable instead of relying on shuttleconsoles?
@@ -99,9 +98,8 @@ public sealed class TargetSeekingSystem : EntitySystem
             if (_validTargetableEntities.ContainsKey(bodyEntity))
                 continue;
 
-            var targetMapCoordinates = _transform.GetMapCoordinates(targetTransformComponent);
-
-            _validTargetableEntities[bodyEntity] = (targetMapCoordinates, _thermalSignatureSystem.GetSignature(bodyUid));
+            var targetWorldCoordinates = _transform.GetWorldPosition(targetTransformComponent);
+            _validTargetableEntities[bodyEntity] = (targetWorldCoordinates, _thermalSignatureSystem.GetSignature(bodyUid));
 
             // just stop
             if (_validTargetableEntities.Count > MaximumPotentialTargets)
@@ -112,8 +110,13 @@ public sealed class TargetSeekingSystem : EntitySystem
     public override void Update(float frameTime)
     {
         base.Update(frameTime);
+        var curTime = _gameTiming.CurTime;
 
-        var ticktime = _gameTiming.TickPeriod;
+        if (curTime >= _nextSeekerTargetQuery)
+        {
+            _nextSeekerTargetQuery = curTime + SeekerTargetQueryInterval;
+            RequeryTargetableEntities();
+        }
 
         var query = EntityQueryEnumerator<TargetSeekingComponent, PhysicsComponent, TransformComponent>();
         while (query.MoveNext(out var uid, out var seekingComp, out var body, out var xform))
@@ -148,8 +151,7 @@ public sealed class TargetSeekingSystem : EntitySystem
             // If we can lose our target, then always try to find a new one.
             var tryGetTarget = seekingComp.CanLoseTarget;
 
-            // If we have a target, track it using the selected algorithm
-            if (seekingComp.CurrentTarget.HasValue && !TerminatingOrDeleted(seekingComp.CurrentTarget))
+            if (seekingComp.CurrentTarget.HasValue && !TerminatingOrDeleted(seekingComp.CurrentTarget)) // If we have a target, track it using the selected algorithm
             {
                 var target = seekingComp.CurrentTarget.Value;
                 if (!_physicsQuery.TryGetComponent(target, out var targetBody))
@@ -161,11 +163,11 @@ public sealed class TargetSeekingSystem : EntitySystem
                 switch (seekingComp.TrackingAlgorithm)
                 {
                     case TrackingMethod.Direct:
-                        wantAngle = ApplyDirectTracking((uid, xform), (target, targetXform), frameTime); break;
+                        wantAngle = ApplyDirectTracking((uid, xform), (target, targetXform)); break;
                     case TrackingMethod.Predictive:
-                        wantAngle = ApplyPredictiveTracking((uid, seekingComp, body, xform), (target, targetBody, targetXform), frameTime); break;
+                        wantAngle = ApplyPredictiveTracking((uid, seekingComp, body, xform), (target, targetBody, targetXform)); break;
                     case TrackingMethod.AdvancedPredictive:
-                        wantAngle = ApplyAdvancedTracking((uid, seekingComp, body, xform), (target, targetBody, targetXform), frameTime); break;
+                        wantAngle = ApplyAdvancedTracking((uid, seekingComp, body, xform), (target, targetBody, targetXform)); break;
                 }
 
                 _rotateToFace.TryRotateTo(
@@ -181,11 +183,12 @@ public sealed class TargetSeekingSystem : EntitySystem
                 tryGetTarget = true;
 
             if (tryGetTarget &&
-                _gameTiming.CurTime > seekingComp.NextTargetLock)
+                _validTargetableEntities.Count > 0 &&
+                curTime >= seekingComp.NextTargetLock)
             {
                 // Its time to find and kill
-                AcquireTarget(uid, seekingComp, xform);
-                seekingComp.NextTargetLock = _gameTiming.CurTime + SeekerTargetAcquisitionInterval;
+                AcquireTarget((uid, seekingComp, xform));
+                seekingComp.NextTargetLock = curTime + SeekerTargetLockInterval;
             }
         }
     }
@@ -199,11 +202,8 @@ public sealed class TargetSeekingSystem : EntitySystem
     /// <summary>
     /// Called on a seeker when its <see cref="TargetSeekingComponent.CurrentTarget"/> is changed, directed at the new target.
     /// </summary>
-    private void OnStartingSeeking(Entity<TargetSeekingComponent, TransformComponent?> seekerTransformEntity, EntityUid newTargetUid)
+    private void OnStartingSeeking(in Entity<TargetSeekingComponent, TransformComponent> seekerTransformEntity, EntityUid newTargetUid)
     {
-        if (!Resolve(seekerTransformEntity, ref seekerTransformEntity.Comp2))
-            return;
-
         var startedSeekingEvent = new EntityStartedBeingSeekedTargetEvent(seekerTransformEntity!, seekerTransformEntity.Comp1.ExposesTracking);
         RaiseLocalEvent(newTargetUid, ref startedSeekingEvent);
     }
@@ -233,9 +233,13 @@ public sealed class TargetSeekingSystem : EntitySystem
     // NOTE: In the future, someone could want to change this to separate whether `CurrentTarget` is null with whether the seeker is actually targeting something.
     //       If so, change this to take in whether the seeker should be targeting something, rather than whether the target exists.
     //       Then, you'd be free to set `CurrentTarget` without needing to use this function.. ideally.
-    public void SetSeekerTarget(Entity<TargetSeekingComponent> seekerEntity, EntityUid? targetUid, TransformComponent? seekerTransform = null, float? targetScore = null)
+    public void SetSeekerTarget(in Entity<TargetSeekingComponent, TransformComponent?> seekerEntity, EntityUid? targetUid, float? targetScore = null)
     {
-        var (_, seekerComponent) = seekerEntity;
+        var seekerTransform = seekerEntity.Comp2;
+        if (!Resolve(seekerEntity, ref seekerTransform))
+            return;
+
+        var seekerComponent = seekerEntity.Comp1;
 
         // if the new target is different from the old target,
         if (seekerComponent.CurrentTarget != targetUid)
@@ -300,62 +304,91 @@ public sealed class TargetSeekingSystem : EntitySystem
     /// <summary>
     /// Finds the most optimal valid target within range and tracking parameters.
     /// </summary>
-    public void AcquireTarget(EntityUid uid, TargetSeekingComponent component, TransformComponent transform)
+    /// <remarks>
+    /// Not thread-safe, dont even think about it.
+    /// </remarks>
+    public void AcquireTarget(in Entity<TargetSeekingComponent, TransformComponent> seekerEntity)
     {
+        var (seekerUid, seekerComponent, seekerTransform) = seekerEntity;
+        seekerComponent.IntermediateTargets.Clear();
+
         /*
         Normally, the required threshold for a target to be considered is our ThermalSignatureThreshold.
 
         However, if we can change targets and have to compare thermalsig, the new target must have a higher
         signature.
         */
-        // this method is a tutorial on how to troll the gc
 
         // Are we allowed to replace our current target with a new one?
-        var canRealisticallyLoseTarget = component.CurrentTarget.HasValue;
+        var canRealisticallyLoseTarget = seekerComponent.CurrentTarget.HasValue;
 
-        // Minimum required cellsig.
-        var minimumRequiredSignature = canRealisticallyLoseTarget && component.TargetingComparesThermalSignature ?
-            MathF.Max(component.ThermalSignatureThreshold, _thermalSignatureSystem.GetSignature(component.CurrentTarget!.Value)) : component.ThermalSignatureThreshold;
+        // Minimum required signature of a cell to be considered for target lock.
+        var minimumRequiredSignature = canRealisticallyLoseTarget && seekerComponent.TargetingComparesThermalSignature ?
+            MathF.Max(seekerComponent.ThermalSignatureThreshold, _thermalSignatureSystem.GetSignature(seekerComponent.CurrentTarget!.Value)) : seekerComponent.ThermalSignatureThreshold;
 
         if (minimumRequiredSignature < SharedThermalSignatureSystem.SignatureZeroEpsilon)
             minimumRequiredSignature = SharedThermalSignatureSystem.SignatureZeroEpsilon;
 
-        var targetQuery = EntityQueryEnumerator<TargetSeekableComponent, TransformComponent>();
-        var sourcePos = _transform.ToMapCoordinates(transform.Coordinates).Position;
+        var sourcePos = _transform.GetWorldPosition(seekerTransform);
 
-        var detectionRangeSquared = component.DetectionRange * component.DetectionRange;
+        var detectionRangeSquared = seekerComponent.DetectionRange * seekerComponent.DetectionRange;
 
-        // get the strongest-signature group of entities
-        var bestSignatures = _thermalSignatureSystem.SolveSignatureCollections(validSignatureEntities);
+        // for targets that we may actually lock on to
+        var strictScanAngle = seekerComponent.ScanArc / 2;
+        // for targets that will contribute to the heatmap, but we won't lock onto
+        var lenientScanAngle = strictScanAngle * 1.5f;
 
-        var bestScore = component.CurrentTargetScore ?? float.MinValue;
-        EntityUid? bestTarget = component.CurrentTarget ?? null;
-
-        // Look for things to target
-        foreach (var (targetUid, targetSignature) in bestSignatures)
+        // get intermediate targets
+        foreach (var ((targetUid, targetTransform), (entityWorldCoordinates, entitySignature)) in _validTargetableEntities)
         {
-            /// continue if the target doesn't have high enough of a thermal signature
-            if (!TryComp(targetUid, out TransformComponent? targetXform))
+            if (targetTransform.MapUid != seekerTransform.MapUid ||
+                entitySignature < minimumRequiredSignature)
                 continue;
 
             // Get angle to the target
-            var targetPos = _transform.ToMapCoordinates(targetXform.Coordinates).Position;
-            var angleToTarget = (targetPos - sourcePos).ToWorldAngle();
+            var targetPos = _transform.GetWorldPosition(targetTransform);
 
-            // we can't update if this target is worse than the last best score
-            var targetScore = GetTargetInfluence(targetSignature, Vector2.Distance(sourcePos, targetPos), component.TargetDistanceScoringPower);
-            if (targetScore < bestScore)
+            var delta = targetPos - sourcePos;
+
+            // continue if too far
+            var deltaLengthSq = delta.LengthSquared();
+            if (deltaLengthSq > detectionRangeSquared)
                 continue;
 
-            // Get current direction of the projectile
-            var currentRotation = _transform.GetWorldRotation(transform);
+            var angleToTarget = delta.ToWorldAngle();
+            var currentRotation = _transform.GetWorldRotation(targetTransform);
 
             // Check if target is within field of view
-            var angleDifference = Angle.ShortestDistance(currentRotation, angleToTarget).Degrees;
-            if (MathF.Abs((float)angleDifference) > component.ScanArc / 2)
-            {
-                continue; // Target is outside our field of view
-            }
+            var angleDifference = MathF.Abs((float)Angle.ShortestDistance(currentRotation, angleToTarget).Degrees);
+            if (angleDifference > lenientScanAngle)
+                continue; // Target is outside of lenient scanangle
+
+            // Basically: if the target is outside of the strict-scan-angle, but inside the lenient-scan-angle, it will contribute
+            // to the overall heatmap. However, it won't actually have the chance to be locked onto, unlike targets that are only
+            // in the 
+            var discardLater = angleDifference > strictScanAngle;
+            seekerComponent.IntermediateTargets[targetUid] = (entityWorldCoordinates, entitySignature, (discardLater, deltaLengthSq));
+        }
+
+        if (seekerComponent.IntermediateTargets.Count == 0)
+            return;
+
+        // get the strongest-signature group of entities
+        var bestSignatures = _thermalSignatureSystem.SolveSignatureCollections(seekerComponent.IntermediateTargets);
+
+        var bestScore = seekerComponent.CurrentTargetScore ?? float.MinValue;
+        var bestTarget = seekerComponent.CurrentTarget ?? null;
+
+        // Look for things to target
+        foreach (var (targetUid, targetSignature, (discardNow, worldTargetDistanceSquared)) in bestSignatures)
+        {
+            if (discardNow)
+                continue;
+
+            // we can't update if this target is worse than the last best score
+            var targetScore = GetTargetInfluence(targetSignature, MathF.Sqrt(worldTargetDistanceSquared), seekerComponent.TargetDistanceScoringPower);
+            if (targetScore < bestScore)
+                continue;
 
             bestScore = targetScore;
             bestTarget = targetUid;
@@ -364,15 +397,15 @@ public sealed class TargetSeekingSystem : EntitySystem
         // Set our new target
         if (bestTarget.HasValue)
         {
-            SetSeekerTarget((uid, component), bestTarget, transform, bestScore);
-            Log.Debug($"Locked onto a target! {ToPrettyString(bestTarget.Value)}, position: {validSignatureEntities[bestTarget.Value].Item1}, score: {bestScore}");
+            SetSeekerTarget((seekerUid, seekerComponent, seekerTransform), bestTarget, bestScore);
+            Log.Debug($"Locked onto a target! {ToPrettyString(bestTarget.Value)}, score: {bestScore}");
         }
     }
 
     /// <summary>
     /// Advanced tracking that predicts where the target will be based on its velocity.
     /// </summary>
-    public Angle ApplyPredictiveTracking(Entity<TargetSeekingComponent, PhysicsComponent, TransformComponent> ent, Entity<PhysicsComponent, TransformComponent> target, float frameTime)
+    public Angle ApplyPredictiveTracking(in Entity<TargetSeekingComponent, PhysicsComponent, TransformComponent> ent, in Entity<PhysicsComponent, TransformComponent> target)
     {
         // Get current positions
         var currentTargetPosition = _transform.GetWorldPosition(target.Comp2);
@@ -407,7 +440,7 @@ public sealed class TargetSeekingSystem : EntitySystem
     /// Works best for missiles with low friction and high max speed, where they spend all or most of their lifetime accelerating and being under max speed.
     /// </summary>
     // see: https://github.com/Ilya246/orbitfight/blob/master/src/entities.cpp for original
-    public Angle ApplyAdvancedTracking(Entity<TargetSeekingComponent, PhysicsComponent, TransformComponent> ent, Entity<PhysicsComponent, TransformComponent> target, float frameTime)
+    public Angle ApplyAdvancedTracking(in Entity<TargetSeekingComponent, PhysicsComponent, TransformComponent> ent, in Entity<PhysicsComponent, TransformComponent> target)
     {
         const int guidanceIterations = 3;
 
@@ -437,19 +470,19 @@ public sealed class TargetSeekingSystem : EntitySystem
         return targetRot;
 
         // the explanation for how this works would take more space than the enclosing method so it's not included here
-        float GuessInterceptTime(float prev, float x0, float vel, float y0, float accel)
+        static float GuessInterceptTime(float prev, float x0, float vel, float y0, float accel)
         {
             var x = x0 + vel * prev;
             var d = MathF.Sqrt(x * x + y0 * y0);
             var dd = vel * x / d;
-            return (dd + MathF.Sqrt(dd * dd + 2f * accel * (d - dd * prev))) / (accel);
+            return (dd + MathF.Sqrt(dd * dd + 2f * accel * (d - dd * prev))) / accel;
         }
     }
 
     /// <summary>
     /// Basic tracking that points directly at the current target position.
     /// </summary>
-    public Angle ApplyDirectTracking(Entity<TransformComponent> ent, Entity<TransformComponent> target, float frameTime)
+    public Angle ApplyDirectTracking(in Entity<TransformComponent> ent, in Entity<TransformComponent> target)
     {
         // Get the angle directly toward the target
         var angleToTarget = (_transform.GetWorldPosition(target.Comp) - _transform.GetWorldPosition(ent.Comp)).ToWorldAngle();

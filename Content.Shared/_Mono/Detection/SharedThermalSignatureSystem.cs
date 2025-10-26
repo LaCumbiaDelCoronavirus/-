@@ -46,23 +46,26 @@ public class SharedThermalSignatureSystem : EntitySystem
     }
 
     /// <summary>
-    ///     Returns the cached heat signature of an entity if it has <see cref="ThermalSignatureComponent"/>
-    ///         Otherwise, returns 0.
+    ///     Returns the cached heat signature of an entity if it has <see cref="ThermalSignatureComponent"/>.
+    ///         If the component is not present, returns 0.
     /// </summary>
     [Pure]
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public float GetSignature(in Entity<ThermalSignatureComponent?> entity)
+    public float GetSignature(Entity<ThermalSignatureComponent?> entity)
     {
         // resolvevil
-        if (entity.Comp is { } signatureComponent || SigQuery.TryGetComponent(entity, out signatureComponent))
-            return signatureComponent.TotalHeat;
+        if (SigQuery.Resolve(entity, ref entity.Comp, logMissing: false))
+            return entity.Comp.TotalHeat;
 
         return 0f;
     }
 
     /// <summary>
-    ///     Tries to resolve <see cref="ThermalSignatureComponent"/> and get it's heat signature, on the given entity. 
+    ///     Tries to resolve <see cref="ThermalSignatureComponent"/> and get it's heat signature, on the given entity.
     /// </summary>
+    /// <returns>
+    ///     Whether a <see cref="ThermalSignatureComponent"/> was present. 
+    /// </returns>
     [Pure]
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool ResolveSignature(in EntityUid uid, [NotNullWhen(true)] ref ThermalSignatureComponent? signatureComponent, out float signature)

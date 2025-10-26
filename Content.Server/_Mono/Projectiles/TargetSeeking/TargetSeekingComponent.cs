@@ -6,6 +6,8 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+using System.Numerics;
+
 namespace Content.Server._Mono.Projectiles.TargetSeeking;
 
 /// <summary>
@@ -14,6 +16,13 @@ namespace Content.Server._Mono.Projectiles.TargetSeeking;
 [RegisterComponent, AutoGenerateComponentPause]
 public sealed partial class TargetSeekingComponent : Component
 {
+    /// This is only used for <see cref="TargetSeekingSystem.AcquireTarget"/>, and stays here so that we don't alloate this everytime that gets run. 
+    /// <summary>
+    /// Key: a possible target
+    /// Value: target's world position + thermal signature + whether to discard it when finally searching for targets to lock onto + squared distance from the seeker
+    /// </summary>
+    public Dictionary<EntityUid, (Vector2, float, (bool, float))> IntermediateTargets = new();
+
     /// <summary>
     /// The next time this seeker locks onto a target.
     /// </summary>
