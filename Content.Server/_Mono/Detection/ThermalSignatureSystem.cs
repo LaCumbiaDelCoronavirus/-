@@ -39,8 +39,8 @@ public sealed class ThermalSignatureSystem : SharedThermalSignatureSystem
     private EntityQuery<GunComponent> _gunQuery;
 
     // length of cells in SolveSignatureCollections; map gets higher resolution the lower this is, therefore making this take a generally longer time to process
-    // stats: 20 resolution gives ~.61 ms processing time for 55 signatures
-    private const float SignatureResolution = 20f;
+    // stats: 20 resolution gives ~.061 ms processing time for 55 signatures
+    private const float SignatureResolution = 30f;
     private const float SignatureResolutionSq = SignatureResolution * SignatureResolution;
 
     public override void Initialize()

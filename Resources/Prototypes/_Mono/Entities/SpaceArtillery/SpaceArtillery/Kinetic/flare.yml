@@ -1,7 +1,7 @@
 
 - type: entity
   parent: WeaponTurretVespera
-  id: WeaponTurretVesperaFlare
+  id: WeaponTurretSeren
   name: ADMP-F-27 SEREN Rapid-Fire Pod
   description: A model of the ADMP-27, fitted to fire thermal flares instead of rockets. Distracts missiles and other heat-seeking projectiles with intense thermal signatures. Has a delay after the last shot before it can start recharging. Can be remotely activated or linked to a GCS.
   components:
@@ -17,7 +17,9 @@
   - type: Gun
     fireRate: 4.6
     shootThermalSignature: 1440000 #1.2km if firing continuously
-    projectileSpeed: 32
+    projectileSpeed: 64
+    shotsPerBurst: 4
+    burstCooldown: 0.5
     soundGunshot:
       path: /Audio/Weapons/Guns/Gunshots/rocket_launcher.ogg
       params:
@@ -29,7 +31,7 @@
     autoRecharge: true
     autoRechargeRate: 320
     autoRechargePause: true
-    autoRechargePauseTime: 45
+    autoRechargePauseTime: 20
   - type: ProjectileBatteryAmmoProvider
     proto: ShipThermalFlare
     fireCost: 475
@@ -42,7 +44,7 @@
 - type: entity
   id: ShipThermalFlare
   name: thermal flare
-  description: A relatively large and very-hot-burning flare, meant to attract heat-seeking projectiles.
+  description: A relatively large and very-hot-burning flare, meant to distract heat-seeking projectiles.
   components:
   - type: Physics
     bodyType: Dynamic
@@ -60,12 +62,11 @@
   - type: Sprite
     sprite: Objects/Misc/flare.rsi
     layers:
-      - map: [ enum.ExpendableLightVisualLayers.Glow ]
-        state: flare_burn
-        color: "#FFFFFF"
-        shader: unshaded
-        offset: -0.5,-0.5
-        scale: 2,2
+    - state: flare_burn
+      color: "#FFFFFF"
+      shader: unshaded
+      offset: -0.5,-0.5
+      scale: 2,2
   - type: Item
     size: Large
   - type: MultiHandedItem
@@ -73,10 +74,10 @@
     lifetime: 25
   - type: TargetSeekable
   - type: ThermalSignature
-    storedHeat: 1562500 # equivalent to 1250 metres, without any heat dissipated
+    storedHeat: 722500 # equivalent to 850 metres, without any heat dissipated
     heatDissipation: 0.98 # it despawns very quickly anyway
   - type: PassiveThermalSignature
-    signature: 22500 # 150 metres
+    signature: 25000 # 50 metres
   - type: AmbientSound
     volume: -8
     range: 25
