@@ -244,7 +244,7 @@ public sealed partial class PowerCellSystem : SharedPowerCellSystem
     private void OnCellExamined(EntityUid uid, PowerCellComponent component, ExaminedEvent args)
     {
         TryComp<BatteryComponent>(uid, out var battery);
-        OnBatteryExamined(uid, battery, args);
+        OnBatteryExamined(TryGetRoundedBatteryChargePercentage((uid, battery)), ref args); // Goobstation
     }
 
     private void OnCellEmpAttempt(EntityUid uid, PowerCellComponent component, EmpAttemptEvent args)
@@ -257,20 +257,29 @@ public sealed partial class PowerCellSystem : SharedPowerCellSystem
 
     private void OnCellSlotExamined(EntityUid uid, PowerCellSlotComponent component, ExaminedEvent args)
     {
-        TryGetBatteryFromSlot(uid, out var batteryEnt, out var battery); // Goobstation
-        OnBatteryExamined(batteryEnt.GetValueOrDefault(uid), battery, args); // Goobstation
+        TryGetBatteryFromSlot(uid, out var batteryUid, out var battery); // Goobstation
+
+        var chargePercentage = batteryUid.HasValue ?
+            TryGetRoundedBatteryChargePercentage((batteryUid.GetValueOrDefault(uid), battery)) :
+            null;
+
+        OnBatteryExamined(chargePercentage, ref args); // Goobstation
     }
 
-    public void OnBatteryExamined(EntityUid uid, BatteryComponent? component, ExaminedEvent args) // WD EDIT
+    // Monolith addition: TryGetBatteryChargePercentage
+    /// <summary>
+    ///     Tries to get the rounded charge percentage of the
+    ///         <see cref="BatteryComponent"/> of the
+    ///         given entity, from 0 to 100.
+    /// </summary>
+    /// <returns>Rounded charge percentage of the <see cref="BatteryComponent"/> if any was present, from 0 (empty) to 100 (full).</returns>
+    public static float? TryGetRoundedBatteryChargePercentage(Entity<BatteryComponent?> entity)
     {
-        if (Resolve(uid, ref component, false)) // WD EDIT
-        {
-            var charge = component.CurrentCharge / component.MaxCharge * 100;
-            args.PushMarkup(Loc.GetString("power-cell-component-examine-details", ("currentCharge", $"{charge:F0}")));
-        }
-        else
-        {
-            args.PushMarkup(Loc.GetString("power-cell-component-examine-details-no-battery"));
-        }
+        if (entity.Comp is { } batteryComponent)
+            return MathF.Round(batteryComponent.CurrentCharge / batteryComponent.MaxCharge * 100);
+
+        return null;
     }
+
+    // Mono edit: This comment is in-place of where OnBatteryExamined() was. It was moved to SharedPowerCellSystem.
 }

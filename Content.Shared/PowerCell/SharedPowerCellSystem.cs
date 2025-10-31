@@ -12,6 +12,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 using Content.Shared.Containers.ItemSlots;
+using Content.Shared.Examine;
 using Content.Shared.PowerCell.Components;
 using Content.Shared.Rejuvenate;
 using Robust.Shared.Containers;
@@ -101,6 +102,22 @@ public abstract class SharedPowerCellSystem : EntitySystem
         ent.Comp.Enabled = enabled;
         QueueUpdate(ent); // Mono - fix, should be ported to wizden too
         Dirty(ent, ent.Comp);
+    }
+
+    /// <summary>
+    ///     Pushes appropriate markup to the given
+    ///         <see cref="ExaminedEvent"/>, given
+    ///         a battery's charge percentage from
+    ///         0 to 100. 
+    /// </summary>
+    // Monolith edit: changed to use ChargePercentage
+    // Monolith edit: moved to Shared
+    public void OnBatteryExamined(float? chargePercentage, ref ExaminedEvent args) // WD EDIT
+    {
+        if (chargePercentage != null) // WD EDIT
+            args.PushMarkup(Loc.GetString("power-cell-component-examine-details", ("currentCharge", $"{MathF.Round(chargePercentage.Value)}")));
+        else
+            args.PushMarkup(Loc.GetString("power-cell-component-examine-details-no-battery"));
     }
 
     /// <summary>

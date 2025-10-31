@@ -108,6 +108,7 @@ public sealed partial class BlockingSystem : SharedBlockingSystem // Mono
         }
     }
     // Mono end
+
     private void OnEquipped(EntityUid uid, BlockingComponent component, ref GotEquippedEvent args) // Mono
     {
         // Mono start
@@ -244,7 +245,7 @@ public sealed partial class BlockingSystem : SharedBlockingSystem // Mono
             }
 
             // Don't allow someone to block if they're not holding the shield
-            if(!_handsSystem.IsHolding(user, item, out _))
+            if (!_handsSystem.IsHolding(user, item, out _))
             {
                 CantBlockError(user);
                 return false;
@@ -277,7 +278,7 @@ public sealed partial class BlockingSystem : SharedBlockingSystem // Mono
             if (_gameTiming.IsFirstTimePredicted)
             {
                 _popupSystem.PopupEntity(msgOther, user, Filter.PvsExcept(user), true);
-                if(_gameTiming.InPrediction)
+                if (_gameTiming.InPrediction)
                     _popupSystem.PopupEntity(msgUser, user, user);
             }
         }
@@ -288,7 +289,7 @@ public sealed partial class BlockingSystem : SharedBlockingSystem // Mono
                 component.Shape,
                 BlockingComponent.BlockFixtureID,
                 hard: false, // Frontier - True to false, mobs AI abuse.
-                collisionLayer: (int) CollisionGroup.WallLayer,
+                collisionLayer: (int)CollisionGroup.WallLayer,
                 body: physicsComponent);
         }
 
@@ -345,7 +346,7 @@ public sealed partial class BlockingSystem : SharedBlockingSystem // Mono
             if (_gameTiming.IsFirstTimePredicted)
             {
                 _popupSystem.PopupEntity(msgOther, user, Filter.PvsExcept(user), true);
-                if(_gameTiming.InPrediction)
+                if (_gameTiming.InPrediction)
                     _popupSystem.PopupEntity(msgUser, user, user);
             }
         }
@@ -400,10 +401,10 @@ public sealed partial class BlockingSystem : SharedBlockingSystem // Mono
         var modifier = component.IsBlocking ? component.ActiveBlockDamageModifier : component.PassiveBlockDamageModifer;
 
         var msg = new FormattedMessage();
-            msg.AddMarkupOrThrow(
-            Loc.GetString((component.IsClothing ? "blocking-fraction-armor" : "blocking-fraction"),
-            ("value", MathF.Round(fraction * 100, 1)))
-        );
+        msg.AddMarkupOrThrow(
+        Loc.GetString((component.IsClothing ? "blocking-fraction-armor" : "blocking-fraction"),
+        ("value", MathF.Round(fraction * 100, 1)))
+    );
 
         AppendCoefficients(modifier, msg);
 

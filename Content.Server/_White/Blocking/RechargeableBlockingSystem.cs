@@ -4,62 +4,63 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-using Content.Server.Popups;
 using Content.Server.Power.Components;
 using Content.Server.Power.EntitySystems;
-using Content.Server.PowerCell;
-using Content.Shared._Mono.Blocking; // Mono
+using Content.Shared._White.Blocking;
 using Content.Shared.Damage;
-using Content.Shared.Examine;
 using Content.Shared.Item.ItemToggle;
-using Content.Shared.Item.ItemToggle.Components;
 using Content.Shared.PowerCell.Components;
 
 namespace Content.Server._White.Blocking;
 
-public sealed class RechargeableBlockingSystem : SharedBlockingSystem // Mono
+public sealed class RechargeableBlockingSystem : SharedRechargeableBlockingSystem
 {
     [Dependency] private readonly BatterySystem _battery = default!;
-    [Dependency] private readonly ItemToggleSystem _itemToggle = default!;
-    [Dependency] private readonly PopupSystem _popup = default!;
-    [Dependency] private readonly PowerCellSystem _powerCell = default!;
+    [Dependency] private readonly ItemToggleSystem _itemToggleSystem = default!;
 
     public override void Initialize()
     {
-        SubscribeLocalEvent<RechargeableBlockingComponent, ExaminedEvent>(OnExamined);
-        SubscribeLocalEvent<RechargeableBlockingComponent, DamageChangedEvent>(OnDamageChanged);
-        SubscribeLocalEvent<RechargeableBlockingComponent, ItemToggleActivateAttemptEvent>(AttemptToggle);
+        base.Initialize();
+
         SubscribeLocalEvent<RechargeableBlockingComponent, ChargeChangedEvent>(OnChargeChanged);
         SubscribeLocalEvent<RechargeableBlockingComponent, PowerCellChangedEvent>(OnPowerCellChanged);
+        SubscribeLocalEvent<RechargeableBlockingComponent, DamageChangedEvent>(OnDamageChanged);
     }
 
-    private void OnExamined(EntityUid uid, RechargeableBlockingComponent component, ExaminedEvent args)
+    /// <summary>
+    ///     Tries to update the given entity's <see cref="RechargeableBlockingComponent.TimeUntilRecharge"/>.
+    ///         Dirties the associated field.
+    /// </summary>
+    /// <returns>True if successfully updated.</returns>
+    private bool UpdateTimeUntilRecharge(in Entity<RechargeableBlockingComponent> rechargeableBlockingEntity)
     {
-        if (!component.Discharged)
-        {
-            _powerCell.OnBatteryExamined(uid, null, args);
-            return;
-        }
+        if (!_battery.TryGetBatteryComponent(rechargeableBlockingEntity, out var batteryComponent, out var batteryUid)
+            || !TryComp<BatterySelfRechargerComponent>(batteryUid, out var rechargerComponent)
+            || rechargerComponent is not { AutoRechargeRate: > 0, AutoRecharge: true })
+            return false;
 
-        args.PushMarkup(Loc.GetString("rechargeable-blocking-discharged"));
-        args.PushMarkup(Loc.GetString("rechargeable-blocking-remaining-time", ("remainingTime", GetRemainingTime(uid))));
+        var remainingTimeUntilCharged = (batteryComponent.MaxCharge - batteryComponent.CurrentCharge) / rechargerComponent.AutoRechargeRate;
+
+        rechargeableBlockingEntity.Comp.CachedTimeOfRecharge = GameTiming.CurTime + TimeSpan.FromSeconds(remainingTimeUntilCharged);
+        DirtyField(rechargeableBlockingEntity, rechargeableBlockingEntity.Comp, nameof(rechargeableBlockingEntity.Comp.CachedTimeOfRecharge));
+
+        return true;
     }
 
-    private int GetRemainingTime(EntityUid uid)
+    private void OnChargeChanged(Entity<RechargeableBlockingComponent> rechargeableBlockingEntity, ref ChargeChangedEvent args)
     {
-        if (!_battery.TryGetBatteryComponent(uid, out var batteryComponent, out var batteryUid)
-            || !TryComp<BatterySelfRechargerComponent>(batteryUid, out var recharger)
-            || recharger is not { AutoRechargeRate: > 0, AutoRecharge: true })
-            return 0;
+        UpdateCharge(rechargeableBlockingEntity);
+    }
 
-        return (int) MathF.Round((batteryComponent.MaxCharge - batteryComponent.CurrentCharge) /
-                                 recharger.AutoRechargeRate);
+    private void OnPowerCellChanged(Entity<RechargeableBlockingComponent> rechargeableBlockingEntity, ref PowerCellChangedEvent args)
+    {
+        UpdateCharge(rechargeableBlockingEntity);
     }
 
     private void OnDamageChanged(EntityUid uid, RechargeableBlockingComponent component, DamageChangedEvent args)
     {
         if (!_battery.TryGetBatteryComponent(uid, out var batteryComponent, out var batteryUid)
-            || !_itemToggle.IsActivated(uid)
+            || !_itemToggleSystem.IsActivated(uid)
             || args.DamageDelta == null)
             return;
 
@@ -67,47 +68,50 @@ public sealed class RechargeableBlockingSystem : SharedBlockingSystem // Mono
         _battery.TryUseCharge(batteryUid.Value, batteryUse, batteryComponent);
     }
 
-    private void AttemptToggle(EntityUid uid, RechargeableBlockingComponent component, ref ItemToggleActivateAttemptEvent args)
+    private void UpdateCharge(in Entity<RechargeableBlockingComponent> rechargeableBlockingEntity)
     {
-        if (!component.Discharged)
+        var (uid, rechargeableBlockingComponent) = rechargeableBlockingEntity;
+
+        if (!_battery.TryGetBatteryComponent(uid, out var batteryComponent, out _))
             return;
 
-        _popup.PopupEntity(Loc.GetString("rechargeable-blocking-remaining-time-popup",
-                ("remainingTime", GetRemainingTime(uid))),
-            args.User ?? uid);
-        args.Cancelled = true;
-    }
-    private void OnChargeChanged(EntityUid uid, RechargeableBlockingComponent component, ChargeChangedEvent args)
-    {
-        CheckCharge(uid, component);
-    }
-
-    private void OnPowerCellChanged(EntityUid uid, RechargeableBlockingComponent component, PowerCellChangedEvent args)
-    {
-        CheckCharge(uid, component);
-    }
-
-    private void CheckCharge(EntityUid uid, RechargeableBlockingComponent component)
-    {
-        if (!_battery.TryGetBatteryComponent(uid, out var battery, out _))
-            return;
-
-        BatterySelfRechargerComponent? recharger;
-        if (battery.CurrentCharge < 1)
+        // Battery-percentage
+        var roundedBatteryPercentageHundred = (int)((batteryComponent.CurrentCharge - batteryComponent.MaxCharge) * 100);
+        if (roundedBatteryPercentageHundred != rechargeableBlockingComponent.CachedChargePercentage)
         {
-            if (TryComp(uid, out recharger))
-                recharger.AutoRechargeRate = component.DischargedRechargeRate;
-
-            component.Discharged = true;
-            _itemToggle.TryDeactivate(uid, predicted: false);
-            return;
+            rechargeableBlockingComponent.CachedChargePercentage = roundedBatteryPercentageHundred;
+            DirtyField(rechargeableBlockingEntity, rechargeableBlockingComponent, nameof(rechargeableBlockingComponent.CachedChargePercentage));
         }
 
-        if (battery.CurrentCharge < battery.MaxCharge)
-            return;
+        UpdateTimeUntilRecharge(rechargeableBlockingEntity);
 
-        component.Discharged = false;
-        if (TryComp(uid, out recharger))
-                recharger.AutoRechargeRate = component.ChargedRechargeRate;
+        // Charge-rate, discharged-or-not
+        /*
+            If charge is at 0, the battery is considered discharged
+                until charge is at maximum again.
+
+            If charge is at the maximum, only then is the battery not
+                considered discharged anymore, until charge is at 0 again.
+        */
+
+        float? rechargeRate = null;
+        if (MathHelper.CloseTo(batteryComponent.CurrentCharge, 0f))
+        {
+            rechargeableBlockingComponent.Discharged = true;
+            rechargeRate = rechargeableBlockingComponent.DischargedRechargeRate;
+
+            _itemToggleSystem.TryDeactivate(uid, predicted: false);
+            DirtyField(rechargeableBlockingEntity, rechargeableBlockingComponent, nameof(rechargeableBlockingComponent.Discharged));
+        }
+        else if (MathHelper.CloseTo(batteryComponent.CurrentCharge, batteryComponent.MaxCharge))
+        {
+            rechargeableBlockingComponent.Discharged = false;
+            rechargeRate = rechargeableBlockingComponent.ChargedRechargeRate;
+
+            DirtyField(rechargeableBlockingEntity, rechargeableBlockingComponent, nameof(rechargeableBlockingComponent.Discharged));
+        }
+
+        if (rechargeRate != null && TryComp<BatterySelfRechargerComponent>(uid, out var recharger))
+            recharger.AutoRechargeRate = rechargeRate.Value;
     }
 }
