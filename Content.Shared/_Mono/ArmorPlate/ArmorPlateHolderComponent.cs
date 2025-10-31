@@ -7,7 +7,7 @@ using Robust.Shared.GameStates;
 namespace Content.Shared._Mono.ArmorPlate;
 
 /// <summary>
-/// Component for clothes that can hold armor plates in their storage.
+/// Component for storages (e.g. armor-plate-holding clothes, hardsuits) that can hold armor plates in their storage.
 /// </summary>
 [RegisterComponent, NetworkedComponent]
 [AutoGenerateComponentState]
