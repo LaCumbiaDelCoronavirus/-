@@ -3,9 +3,11 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+using Robust.Shared.GameStates;
+
 namespace Content.Shared._White.Blocking;
 
-[RegisterComponent, AutoGenerateComponentState(fieldDeltas: true)]
+[RegisterComponent, NetworkedComponent, AutoGenerateComponentState(fieldDeltas: true)]
 public sealed partial class RechargeableBlockingComponent : Component
 {
     /// <summary>

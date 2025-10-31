@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
+using System.Diagnostics.CodeAnalysis;
 using Content.Shared.Damage;
 using Content.Shared.Damage.Systems;
 using Content.Shared.Destructible;
@@ -27,9 +28,15 @@ public abstract class SharedArmorPlateSystem : EntitySystem
     [Dependency] private readonly DamageableSystem _damageable = default!;
     [Dependency] private readonly SharedContainerSystem _container = default!;
 
+    private EntityQuery<ArmorPlateHolderComponent> _plateHolderQuery;
+    private EntityQuery<ArmorPlateItemComponent> _plateItemQuery;
+
     public override void Initialize()
     {
         base.Initialize();
+
+        _plateHolderQuery = GetEntityQuery<ArmorPlateHolderComponent>();
+        _plateItemQuery = GetEntityQuery<ArmorPlateItemComponent>();
 
         SubscribeLocalEvent<ArmorPlateHolderComponent, EntInsertedIntoContainerMessage>(OnPlateInserted);
         SubscribeLocalEvent<ArmorPlateHolderComponent, EntRemovedFromContainerMessage>(OnPlateRemoved);
@@ -40,26 +47,19 @@ public abstract class SharedArmorPlateSystem : EntitySystem
         SubscribeLocalEvent<ArmorPlateItemComponent, EntityTerminatingEvent>(OnPlateDestroyed);
     }
 
-    private void OnPlateStartup(Entity<ArmorPlateItemComponent> entity, ref ComponentStartup args)
-    {
-
-    }
-
     private void OnPlateInserted(Entity<ArmorPlateHolderComponent> ent, ref EntInsertedIntoContainerMessage args)
     {
         if (args.Container.ID != StorageComponent.ContainerId)
             return;
 
-        var insertedEntity = args.Entity;
-
-        if (!TryComp<ArmorPlateItemComponent>(insertedEntity, out var plateComp))
+        if (!_plateItemQuery.TryGetComponent(args.Entity, out var plateComp))
             return;
 
         var holder = ent.Comp;
 
         if (holder.ActivePlate == null)
         {
-            SetActivePlate(ent, insertedEntity, plateComp, holder);
+            SetActivePlate(ent, args.Entity, plateComp, holder);
         }
     }
 
@@ -80,7 +80,7 @@ public abstract class SharedArmorPlateSystem : EntitySystem
         {
             foreach (var item in storage.Container.ContainedEntities)
             {
-                if (TryComp<ArmorPlateItemComponent>(item, out var plateComp))
+                if (_plateItemQuery.TryGetComponent(item, out var plateComp))
                 {
                     SetActivePlate(ent, item, plateComp, holder);
                     break;
@@ -107,7 +107,7 @@ public abstract class SharedArmorPlateSystem : EntitySystem
 
         var plateName = MetaData(holder.ActivePlate.Value).EntityName;
 
-        if (!TryComp<ArmorPlateItemComponent>(holder.ActivePlate.Value, out var plateItem))
+        if (!_plateItemQuery.TryGetComponent(holder.ActivePlate.Value, out var plateItem))
         {
             args.PushMarkup(Loc.GetString("armor-plate-examine-with-plate-simple", ("plateName", plateName)));
             return;
@@ -149,7 +149,6 @@ public abstract class SharedArmorPlateSystem : EntitySystem
         holder.ActivePlate = plateUid;
         holder.WalkSpeedModifier = plateComp.WalkSpeedModifier;
         holder.SprintSpeedModifier = plateComp.SprintSpeedModifier;
-        holder.StaminaDamageMultiplier = plateComp.StaminaDamageMultiplier;
 
         Dirty(holderUid, holder);
         RefreshMovementSpeed(holderUid);
@@ -163,21 +162,36 @@ public abstract class SharedArmorPlateSystem : EntitySystem
         holder.ActivePlate = null;
         holder.WalkSpeedModifier = 1.0f;
         holder.SprintSpeedModifier = 1.0f;
-        holder.StaminaDamageMultiplier = 1.0f;
 
         Dirty(holderUid, holder);
         RefreshMovementSpeed(holderUid);
     }
 
     /// <summary>
-    /// Refreshes movement speed for the entity wearing this armor.
+    /// Refreshes movement speed for the entity wearing this armor, if possible.
     /// </summary>
     private void RefreshMovementSpeed(EntityUid armorUid)
     {
         if (_inventory.TryGetContainingEntity(armorUid, out var wearer))
-        {
             _movementSpeed.RefreshMovementSpeedModifiers(wearer.Value);
+    }
+
+    /// <summary>
+    /// Tries to get the entity holding an armorplate. This is not necessarily
+    /// the wearer of the plate.
+    /// </summary>
+    /// <returns>True if the holder of the armorplate was found.</returns>
+    public bool TryGetPlateHolder(Entity<TransformComponent?, MetaDataComponent?> plateEntity, [NotNullWhen(true)] out Entity<ArmorPlateHolderComponent>? holderEntity)
+    {
+        if (_container.TryGetContainingContainer(plateEntity, out var container) &&
+            _plateHolderQuery.TryGetComponent(container.Owner, out var holderComponent))
+        {
+            holderEntity = (container.Owner, holderComponent);
+            return true;
         }
+
+        holderEntity = null;
+        return false;
     }
 
     /// <summary>
@@ -187,39 +201,36 @@ public abstract class SharedArmorPlateSystem : EntitySystem
     {
         plate = default;
 
-        if (!Resolve(holder, ref holder.Comp, logMissing: false))
+        if (!_plateHolderQuery.Resolve(holder, ref holder.Comp, logMissing: false))
             return false;
 
         if (holder.Comp.ActivePlate == null)
             return false;
 
-        if (!TryComp<ArmorPlateItemComponent>(holder.Comp.ActivePlate.Value, out var plateComp))
+        if (!_plateItemQuery.TryGetComponent(holder.Comp.ActivePlate.Value, out var plateComp))
             return false;
 
         plate = (holder.Comp.ActivePlate.Value, plateComp);
         return true;
     }
 
-    private void OnBeforeDamageChanged(Entity<InventoryComponent> ent, ref BeforeDamageChangedEvent args)
+    private void OnBeforeDamageChanged(Entity<InventoryComponent> wearerEntity, ref BeforeDamageChangedEvent args)
     {
         if (args.Cancelled || args.Damage.Empty)
             return;
 
-        if (!args.Damage.DamageDict.TryGetValue("Piercing", out var piercingDamage) || piercingDamage <= 0)
-            return;
-
-        if (!_inventory.TryGetSlots(ent, out var slots))
+        if (!_inventory.TryGetSlots(wearerEntity, out var slots))
             return;
 
         foreach (var slot in slots)
         {
-            if (!_inventory.TryGetSlotEntity(ent, slot.Name, out var equipped, ent.Comp))
+            if (!_inventory.TryGetSlotEntity(wearerEntity, slot.Name, out var equipped, wearerEntity.Comp))
                 continue;
 
             if (!TryGetActivePlate(equipped.Value, out var plate))
                 continue;
 
-            AbsorbDamage(ent, plate, piercingDamage);
+            AbsorbDamage(wearerEntity, plate, args.Damage);
 
             args.Damage.DamageDict.Remove("Piercing");
 
@@ -228,17 +239,27 @@ public abstract class SharedArmorPlateSystem : EntitySystem
     }
 
     private void AbsorbDamage(
-        EntityUid user,
+        EntityUid wearer,
         in Entity<ArmorPlateItemComponent> plate,
-        in FixedPoint2 damage)
+        in DamageSpecifier overallDamageSpecifier)
     {
-        var damageSpec = new DamageSpecifier();
-        damageSpec.DamageDict.Add("Blunt", damage);
+        var plateDamageSpecifier = new DamageSpecifier();
+        var staminaDamage = FixedPoint2.Zero;
+        foreach (var (damageType, damageAmount) in overallDamageSpecifier.DamageDict)
+        {
+            if (!plate.Comp.AbsorbedDamageCoefficients.TryGetValue(damageType, out var absorbedDamageCoefficient) ||
+                !plate.Comp.DealtDamageData.TryGetValue(damageType, out var dealtDamageTypeData))
+                continue;
 
-        _damageable.TryChangeDamage(plate.Owner, damageSpec, ignoreResistances: true);
+            var dealtPlateDamage = damageAmount * absorbedDamageCoefficient;
 
-        var staminaDamage = damage.Float() * plate.Comp.StaminaDamageMultiplier;
-        _stamina.TakeStaminaDamage(user, staminaDamage);
+            // indexes twice but who cares
+            plateDamageSpecifier.DamageDict[dealtDamageTypeData.Item1] = plateDamageSpecifier.DamageDict.GetValueOrDefault(dealtDamageTypeData.Item1) + dealtPlateDamage;
+            staminaDamage += dealtPlateDamage * dealtDamageTypeData.Item2;
+        }
+
+        _damageable.TryChangeDamage(plate.Owner, plateDamageSpecifier, ignoreResistances: true);
+        _stamina.TakeStaminaDamage(wearer, (float)staminaDamage);
     }
 
     private void OnPlateDestroyed(Entity<ArmorPlateItemComponent> ent, ref EntityTerminatingEvent args)
@@ -247,7 +268,7 @@ public abstract class SharedArmorPlateSystem : EntitySystem
             return;
 
         var holderUid = container.Owner;
-        if (!TryComp<ArmorPlateHolderComponent>(holderUid, out var holder))
+        if (!_plateHolderQuery.TryGetComponent(holderUid, out var holder))
             return;
 
         if (holder.ActivePlate != ent.Owner)

@@ -16,6 +16,10 @@ public sealed partial class ArmorPlateHolderComponent : Component
     /// <summary>
     /// Reference to the currently active armor plate entity.
     /// </summary>
+
+    // weakentref search keywords incase someone actually tries to implement it in this codebase
+    // TODO: WeakEntityReference
+    // TODO WeakEntityReference
     [DataField]
     [AutoNetworkedField]
     public EntityUid? ActivePlate;
@@ -39,11 +43,5 @@ public sealed partial class ArmorPlateHolderComponent : Component
     [DataField]
     [AutoNetworkedField]
     public float SprintSpeedModifier = 1.0f;
-
-    /// <summary>
-    /// Stamina damage multiplier from the currently active plate.
-    /// </summary>
-    [DataField]
-    public float StaminaDamageMultiplier = 1.0f;
 }
 

@@ -21,7 +21,11 @@
     maxDurability: 25
     walkSpeedModifier: 0.94
     sprintSpeedModifier: 0.94
-    staminaDamageMultiplier: 1.0
+    absorbedDamageCoefficients:
+      Piercing: 1
+    dealtDamageData:
+      Piercing:
+        Blunt: 1
   - type: Damageable
     damageContainer: Inorganic
   - type: Destructible
@@ -51,7 +55,11 @@
     maxDurability: 50
     walkSpeedModifier: 0.92
     sprintSpeedModifier: 0.92
-    staminaDamageMultiplier: 1.0
+    absorbedDamageCoefficients:
+      Piercing: 1
+    dealtDamageData:
+      Piercing:
+        Blunt: 1
   - type: Damageable
     damageContainer: Inorganic
   - type: Destructible
@@ -81,7 +89,11 @@
     maxDurability: 75
     walkSpeedModifier: 0.90
     sprintSpeedModifier: 0.90
-    staminaDamageMultiplier: 1.0
+    absorbedDamageCoefficients:
+      Piercing: 1
+    dealtDamageData:
+      Piercing:
+        Blunt: 1
   - type: Damageable
     damageContainer: Inorganic
   - type: Destructible
@@ -111,7 +123,11 @@
     maxDurability: 100
     walkSpeedModifier: 1.0
     sprintSpeedModifier: 1.0
-    staminaDamageMultiplier: 0.0
+    absorbedDamageCoefficients:
+      Piercing: 1
+    dealtDamageData:
+      Piercing:
+        Blunt: 0
   - type: Damageable
     damageContainer: Inorganic
   - type: Destructible
