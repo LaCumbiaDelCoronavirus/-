@@ -4,6 +4,7 @@
 
 using Content.Shared.Damage;
 using Content.Shared.Damage.Systems;
+using Content.Shared.Destructible;
 using Content.Shared.Examine;
 using Content.Shared.FixedPoint;
 using Content.Shared.Inventory;
@@ -17,7 +18,7 @@ namespace Content.Shared._Mono.ArmorPlate;
 /// <summary>
 /// Handles armor plate insertion, removal, and speed modifier application.
 /// </summary>
-public sealed class SharedArmorPlateSystem : EntitySystem
+public abstract class SharedArmorPlateSystem : EntitySystem
 {
     [Dependency] private readonly MovementSpeedModifierSystem _movementSpeed = default!;
     [Dependency] private readonly InventorySystem _inventory = default!;
@@ -37,6 +38,11 @@ public sealed class SharedArmorPlateSystem : EntitySystem
 
         SubscribeLocalEvent<InventoryComponent, BeforeDamageChangedEvent>(OnBeforeDamageChanged);
         SubscribeLocalEvent<ArmorPlateItemComponent, EntityTerminatingEvent>(OnPlateDestroyed);
+    }
+
+    private void OnPlateStartup(Entity<ArmorPlateItemComponent> entity, ref ComponentStartup args)
+    {
+
     }
 
     private void OnPlateInserted(Entity<ArmorPlateHolderComponent> ent, ref EntInsertedIntoContainerMessage args)
@@ -107,20 +113,17 @@ public sealed class SharedArmorPlateSystem : EntitySystem
             return;
         }
 
-        if (TryComp<DamageableComponent>(holder.ActivePlate.Value, out var damageable))
+        var maxDurability = (float?)plateItem?.MaxDurability;
+        if (maxDurability != null &&
+            TryComp<DamageableComponent>(holder.ActivePlate.Value, out var damageable))
         {
             var totalDamage = damageable.TotalDamage.Int();
-            var maxDurability = plateItem.MaxDurability;
 
-            var durabilityPercent = ((maxDurability - totalDamage) / (float)maxDurability) * 100f;
-            durabilityPercent = Math.Clamp(durabilityPercent, 0f, 100f);
+            var durabilityPercent = (maxDurability.Value - totalDamage) / maxDurability.Value;
+            durabilityPercent = Math.Clamp(durabilityPercent, 0f, 1f);
 
-            var durabilityColor = durabilityPercent switch
-            {
-                > 66f => "green",
-                >= 33f => "yellow",
-                _ => "red",
-            };
+            // goes from red to green as durability gets higher
+            var durabilityColor = Color.InterpolateBetween(Color.Red, Color.Green, durabilityPercent);
 
             args.PushMarkup(Loc.GetString("armor-plate-examine-with-plate",
                 ("plateName", plateName),
@@ -213,10 +216,7 @@ public sealed class SharedArmorPlateSystem : EntitySystem
             if (!_inventory.TryGetSlotEntity(ent, slot.Name, out var equipped, ent.Comp))
                 continue;
 
-            if (!TryComp<ArmorPlateHolderComponent>(equipped, out var holder))
-                continue;
-
-            if (!TryGetActivePlate((equipped.Value, holder), out var plate))
+            if (!TryGetActivePlate(equipped.Value, out var plate))
                 continue;
 
             AbsorbDamage(ent, plate, piercingDamage);
@@ -228,7 +228,7 @@ public sealed class SharedArmorPlateSystem : EntitySystem
     }
 
     private void AbsorbDamage(
-        EntityUid wearer,
+        EntityUid user,
         in Entity<ArmorPlateItemComponent> plate,
         in FixedPoint2 damage)
     {
@@ -238,7 +238,7 @@ public sealed class SharedArmorPlateSystem : EntitySystem
         _damageable.TryChangeDamage(plate.Owner, damageSpec, ignoreResistances: true);
 
         var staminaDamage = damage.Float() * plate.Comp.StaminaDamageMultiplier;
-        _stamina.TakeStaminaDamage(wearer, staminaDamage);
+        _stamina.TakeStaminaDamage(user, staminaDamage);
     }
 
     private void OnPlateDestroyed(Entity<ArmorPlateItemComponent> ent, ref EntityTerminatingEvent args)
@@ -257,9 +257,8 @@ public sealed class SharedArmorPlateSystem : EntitySystem
         {
             if (_inventory.TryGetContainingEntity(holderUid, out var wearer))
             {
-                var plateName = MetaData(ent).EntityName;
                 _popup.PopupEntity(
-                    Loc.GetString("armor-plate-break", ("plateName", plateName)),
+                    Loc.GetString("armor-plate-break", ("plateName", MetaData(ent).EntityName)),
                     wearer.Value,
                     wearer.Value,
                     PopupType.MediumCaution
