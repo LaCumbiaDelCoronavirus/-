@@ -1,10 +1,3 @@
-// SPDX-FileCopyrightText: 2025 Ark
-// SPDX-FileCopyrightText: 2025 Ilya246
-// SPDX-FileCopyrightText: 2025 Redrover1760
-// SPDX-FileCopyrightText: 2025 ark1368
-//
-// SPDX-License-Identifier: AGPL-3.0-or-later
-
 using System.Numerics;
 using Content.Shared._Mono.Radar;
 using Content.Shared.Projectiles;
@@ -35,9 +28,12 @@ public sealed partial class RadarBlipSystem : EntitySystem
         if (!TryComp<RadarConsoleComponent>(radarUid, out var radar))
             return;
 
+        var sourcesEv = new GetRadarSourcesEvent();
+        RaiseLocalEvent(radarUid.Value, ref sourcesEv);
+        var additionalUids = sourcesEv.Sources ?? new List<EntityUid>{radarUid.Value};
 
-        var blips = AssembleBlipsReport((EntityUid)radarUid, radar);
-        var hitscans = AssembleHitscanReport((EntityUid)radarUid, radar);
+        var blips = AssembleBlipsReport((EntityUid)radarUid, additionalUids, radar);
+        var hitscans = AssembleHitscanReport((EntityUid)radarUid, additionalUids, radar);
 
         // Combine the blips and hitscan lines
         var giveEv = new GiveBlipsEvent(blips, hitscans);
@@ -54,15 +50,14 @@ public sealed partial class RadarBlipSystem : EntitySystem
         RaiseNetworkEvent(removalEv);
     }
 
-    private List<(NetEntity netUid, NetCoordinates Position, Vector2 Vel, float Scale, Color Color, RadarBlipShape Shape)> AssembleBlipsReport(EntityUid uid, RadarConsoleComponent? component = null)
+    private List<(NetEntity netUid, NetCoordinates Position, Vector2 Vel, float Scale, Color Color, RadarBlipShape Shape)> AssembleBlipsReport(EntityUid uid, List<EntityUid> sources, RadarConsoleComponent? component = null)
     {
         var blips = new List<(NetEntity netUid, NetCoordinates Position, Vector2 Vel, float Scale, Color Color, RadarBlipShape Shape)>();
 
         if (Resolve(uid, ref component))
         {
             var radarXform = Transform(uid);
-            var radarPosition = _xform.GetWorldPosition(uid);
-            var radarGrid = _xform.GetGrid(uid);
+            var radarGrid = radarXform.GridUid;
             var radarMapId = radarXform.MapID;
 
             // Check if the radar is on an FTL map
@@ -104,8 +99,7 @@ public sealed partial class RadarBlipSystem : EntitySystem
 
                 var blipVelocity = _physics.GetMapLinearVelocity(blipUid, blipPhysics, blipXform);
 
-                var distance = (_xform.GetWorldPosition(blipXform) - radarPosition).Length();
-                if (distance > blip.MaxDistance)
+                if (!NearAnySources(_xform.GetWorldPosition(blipXform), sources, blip.MaxDistance))
                     continue;
 
                 if (blip.RequireNoGrid && blipGrid != null // if we want no grid but we are on a grid
@@ -130,7 +124,7 @@ public sealed partial class RadarBlipSystem : EntitySystem
     /// <summary>
     /// Assembles trajectory information for hitscan projectiles to be displayed on radar
     /// </summary>
-    private List<(Vector2 Start, Vector2 End, float Thickness, Color Color)> AssembleHitscanReport(EntityUid uid, RadarConsoleComponent? component = null)
+    private List<(Vector2 Start, Vector2 End, float Thickness, Color Color)> AssembleHitscanReport(EntityUid uid, List<EntityUid> sources, RadarConsoleComponent? component = null)
     {
         var hitscans = new List<(Vector2 Start, Vector2 End, float Thickness, Color Color)>();
 
@@ -138,8 +132,7 @@ public sealed partial class RadarBlipSystem : EntitySystem
             return hitscans;
 
         var radarXform = Transform(uid);
-        var radarPosition = _xform.GetWorldPosition(uid);
-        var radarGrid = _xform.GetGrid(uid);
+        var radarGrid = radarXform.GridUid;
         var radarMapId = radarXform.MapID;
 
         var hitscanQuery = EntityQueryEnumerator<HitscanRadarComponent>();
@@ -149,16 +142,24 @@ public sealed partial class RadarBlipSystem : EntitySystem
             if (!hitscan.Enabled)
                 continue;
 
-            // Check if either the start or end point is within radar range
-            var startDistance = (hitscan.StartPosition - radarPosition).Length();
-            var endDistance = (hitscan.EndPosition - radarPosition).Length();
-
-            if (startDistance > component.MaxRange && endDistance > component.MaxRange)
+            if (!NearAnySources(hitscan.StartPosition, sources, component.MaxRange) && NearAnySources(hitscan.EndPosition, sources, component.MaxRange))
                 continue;
 
             hitscans.Add((hitscan.StartPosition, hitscan.EndPosition, hitscan.LineThickness, hitscan.RadarColor));
         }
 
         return hitscans;
+    }
+
+    private bool NearAnySources(Vector2 coord, List<EntityUid> sources, float range)
+    {
+        var rsqr = range * range;
+        foreach (var source in sources)
+        {
+            var pos = _xform.GetWorldPosition(source);
+            if ((pos - coord).LengthSquared() < rsqr)
+                return true;
+        }
+        return false;
     }
 }

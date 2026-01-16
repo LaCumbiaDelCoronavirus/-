@@ -34,12 +34,20 @@ ui-options-ambience-volume = Ambience volume:
 ui-options-lobby-volume = Lobby & Round-end volume:
 ui-options-interface-volume = Interface volume:
 ui-options-ambience-max-sounds = Ambience simultaneous sounds:
+ui-options-combat-music-volume = Combat Music volume:
+ui-options-combat-music-windup = Combat Music activation time:
+ui-options-combat-music-winddown = Combat Music deactivation time:
+ui-options-combat-music-sec-format = { $value } sec
 ui-options-lobby-music = Lobby & Round-end Music
 ui-options-restart-sounds = Round Restart Sounds
 ui-options-event-music = Event Music
 ui-options-admin-sounds = Play Admin Sounds
 ui-options-bwoink-sound = Play AHelp Notification Sound
 ui-options-volume-label = Volume
+
+## Mono Audio menu
+
+ui-options-combat-music = Combat Music
 
 ## Graphics menu
 
@@ -135,6 +143,8 @@ ui-options-function-camera-reset = Reset
 ui-options-function-zoom-in = Zoom in
 ui-options-function-zoom-out = Zoom out
 ui-options-function-reset-zoom = Reset zoom
+## Mono
+ui-options-function-toggle-focus = Toggle focus
 
 ui-options-function-use = Use
 ui-options-function-use-secondary = Use secondary

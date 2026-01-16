@@ -1,10 +1,3 @@
-# SPDX-FileCopyrightText: 2024 ErhardSteinhauer
-# SPDX-FileCopyrightText: 2025 core-mene
-# SPDX-FileCopyrightText: 2025 tonotom
-# SPDX-FileCopyrightText: 2025 tonotom1
-#
-# SPDX-License-Identifier: AGPL-3.0-or-later
-
 
 - type: entity
   parent: OreBase
@@ -93,6 +86,7 @@
 # Spawner for lathe: yield random mats if processed in ore processor
 - type: entity
   name: refined scrap
+  description: Comb through the scrap for intact boards, tools, and native materials. Results vary. #Mono
   id: SpawnRandomRefinedScrap
   parent: MarkerBasePlaceFree
   categories: [ HideSpawnMenu ]

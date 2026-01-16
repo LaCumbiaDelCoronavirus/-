@@ -9,15 +9,15 @@
   parent: BaseVessel
   name: AES Ruby
   description: A large vessel for all things science related, anomaly generator included.
-  price: 120000
+  price: 125000
   category: Large
   group: Shipyard
   shuttlePath: /Maps/_Mono/Shuttles/ruby.yml
-  guidebookPage: null
+  guidebookPage: ShipyardRuby
   class:
   - Science
   engine:
-  - Uranium
+  - Plasma
 
 - type: gameMap
   id: Ruby

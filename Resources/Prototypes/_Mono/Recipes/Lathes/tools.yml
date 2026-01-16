@@ -1,9 +1,3 @@
-# SPDX-FileCopyrightText: 2025 ScyronX
-# SPDX-FileCopyrightText: 2025 tonotom
-# SPDX-FileCopyrightText: 2025 tonotom1
-#
-# SPDX-License-Identifier: AGPL-3.0-or-later
-
 - type: latheRecipe
   parent: BaseToolRecipe
   id: MaintenanceJack
@@ -24,3 +18,32 @@
   result: NaniteApplicatorSyndicate
   materials:
     Steel: 500
+
+- type: latheRecipe
+  parent: BaseToolRecipe
+  id: ShipRepairDevice
+  result: ShipRepairDevice
+  materials:
+    Steel: 2400
+    Plastic: 1200
+    Glass: 1200
+    Plasteel: 1600
+    Plasma: 2000
+    Gold: 2000
+    
+- type: latheRecipe
+  parent: BaseToolRecipe
+  id: ShipRepairDeviceAmmo
+  result: ShipRepairDeviceAmmo
+  materials:
+    Steel: 1600
+    Plastic: 800
+    Glass: 800
+    Plasteel: 1600
+    
+- type: latheRecipe
+  parent: BaseToolRecipe
+  id: ScrapShipRepairDeviceAmmo
+  result: ShipRepairDeviceAmmo
+  materials:
+    RawScrap: 50000

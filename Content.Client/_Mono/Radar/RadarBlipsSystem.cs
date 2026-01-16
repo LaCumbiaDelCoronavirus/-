@@ -1,10 +1,3 @@
-// SPDX-FileCopyrightText: 2025 Ark
-// SPDX-FileCopyrightText: 2025 Ilya246
-// SPDX-FileCopyrightText: 2025 Redrover1760
-// SPDX-FileCopyrightText: 2025 ark1368
-//
-// SPDX-License-Identifier: AGPL-3.0-or-later
-
 using System.Numerics;
 using Content.Shared._Mono.Radar;
 using Robust.Shared.Map;
@@ -21,9 +14,6 @@ public sealed partial class RadarBlipsSystem : EntitySystem
     private static readonly List<(Vector2 Start, Vector2 End, float Thickness, Color Color)> EmptyHitscanList = new();
     private TimeSpan _lastRequestTime = TimeSpan.Zero;
     private static readonly TimeSpan RequestThrottle = TimeSpan.FromMilliseconds(250);
-
-    // Maximum distance for blips to be considered visible
-    private const float MaxBlipRenderDistance = 1000f;
 
     [Dependency] private readonly IGameTiming _timing = default!;
     [Dependency] private readonly SharedTransformSystem _xform = default!;
@@ -113,10 +103,6 @@ public sealed partial class RadarBlipsSystem : EntitySystem
 
             var predictedPos = new EntityCoordinates(coord.EntityId, coord.Position + blip.Vel * (float)(_timing.CurTime - _lastUpdatedTime).TotalSeconds);
 
-            // Distance culling for world position blips
-            if (Vector2.DistanceSquared(_xform.ToMapCoordinates(predictedPos).Position, _radarWorldPosition) > MaxBlipRenderDistance * MaxBlipRenderDistance)
-                continue;
-
             result.Add((blip.netUid, predictedPos, blip.Scale, blip.Color, blip.Shape));
         }
 
@@ -137,14 +123,6 @@ public sealed partial class RadarBlipsSystem : EntitySystem
         {
             var worldStart = hitscan.Start;
             var worldEnd = hitscan.End;
-
-            // Distance culling - check if either end of the line is in range
-            var startDist = Vector2.DistanceSquared(worldStart, _radarWorldPosition);
-            var endDist = Vector2.DistanceSquared(worldEnd, _radarWorldPosition);
-
-            if (startDist > MaxBlipRenderDistance * MaxBlipRenderDistance &&
-                endDist > MaxBlipRenderDistance * MaxBlipRenderDistance)
-                continue;
 
             result.Add((worldStart, worldEnd, hitscan.Thickness, hitscan.Color));
         }

@@ -16,7 +16,7 @@ namespace Content.Server._Mono.Projectiles.TargetSeeking;
 [RegisterComponent, AutoGenerateComponentPause]
 public sealed partial class TargetSeekingComponent : Component
 {
-    /// This is only used for <see cref="TargetSeekingSystem.AcquireTarget"/>, and stays here so that we don't alloate this everytime that gets run. 
+    /// This is only used for <see cref="TargetSeekingSystem.AcquireTarget"/>, and stays here so that we don't alloate this everytime that gets run.
     /// <summary>
     /// Key: a possible target
     /// Value: target's world position + thermal signature + whether to discard it when finally searching for targets to lock onto + squared distance from the seeker
@@ -81,7 +81,7 @@ public sealed partial class TargetSeekingComponent : Component
 
     /// <summary>
     /// Incase of <see cref="CanLoseTarget"/>, must the new target have a higher thermal signature
-    /// than the current target, to be considered a potential new target? 
+    /// than the current target, to be considered a potential new target?
     /// </summary>
     [DataField]
     public bool TargetingComparesThermalSignature = false;

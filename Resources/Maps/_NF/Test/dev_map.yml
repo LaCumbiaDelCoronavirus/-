@@ -25,6 +25,7 @@
 # SPDX-FileCopyrightText: 2025 core-mene
 # SPDX-FileCopyrightText: 2025 dustylens
 # SPDX-FileCopyrightText: 2025 starch
+# SPDX-FileCopyrightText: 2025 thoughtlessuser
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
@@ -6806,14 +6807,14 @@ entities:
       rot: -1.5707963267948966 rad
       pos: -3.2517176,-10.459884
       parent: 179
-- proto: ShipyardRCD
+- proto: ShipRepairDevice
   entities:
   - uid: 1248
     components:
     - type: Transform
       pos: -2.0677912,4.7188888
       parent: 179
-- proto: ShipyardRCDAmmo
+- proto: ShipRepairDeviceAmmo
   entities:
   - uid: 1249
     components:
@@ -7266,7 +7267,7 @@ entities:
     - type: Transform
       pos: -3.5,2.5
       parent: 179
-- proto: SpawnPointValet
+- proto: SpawnPointCCServiceWorker
   entities:
   - uid: 1346
     components:

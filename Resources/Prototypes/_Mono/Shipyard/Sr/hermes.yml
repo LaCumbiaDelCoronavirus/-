@@ -1,9 +1,3 @@
-# SPDX-FileCopyrightText: 2025 Avalon
-# SPDX-FileCopyrightText: 2025 Junerisms
-# SPDX-FileCopyrightText: 2025 Redrover1760
-#
-# SPDX-License-Identifier: MPL-2.0
-
 - type: vessel
   id: Hermes
   parent: BaseVessel
@@ -18,7 +12,7 @@
   class:
   - Cargo
   engine:
-  - Uranium
+  - Plasma
 
 - type: gameMap
   id: Hermes

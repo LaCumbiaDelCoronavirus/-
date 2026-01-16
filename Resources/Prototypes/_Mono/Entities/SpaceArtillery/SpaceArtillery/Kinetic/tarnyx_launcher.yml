@@ -1,9 +1,3 @@
-# SPDX-FileCopyrightText: 2025 Ilya246
-# SPDX-FileCopyrightText: 2025 Redrover1760
-# SPDX-FileCopyrightText: 2025 starch
-#
-# SPDX-License-Identifier: AGPL-3.0-or-later
-
 # inf ammo for ads/station
 
 - type: entity
@@ -54,6 +48,9 @@
     shipType: Energy
   - type: ShipGunClass
     shipClass: Heavy
+  - type: ShipRepairable
+    repairTime: 30
+    repairCost: 100
 
 # limited ammo for ships
 
@@ -101,5 +98,9 @@
       tags:
       - 150mmShell
     capacity: 3
+    proto: 150mmEmpShell
     soundInsert:
       path: /Audio/Weapons/Guns/MagIn/batrifle_magin.ogg
+  - type: ShipRepairable
+    repairTime: 30
+    repairCost: 100

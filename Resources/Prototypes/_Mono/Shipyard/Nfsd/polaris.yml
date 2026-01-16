@@ -1,10 +1,3 @@
-# SPDX-FileCopyrightText: 2025 Ilya246
-# SPDX-FileCopyrightText: 2025 Redrover1760
-# SPDX-FileCopyrightText: 2025 sleepyyapril
-# SPDX-FileCopyrightText: 2025 starch
-#
-# SPDX-License-Identifier: AGPL-3.0-or-later
-
 - type: vessel
   id: PolarisShip
   parent: BaseVesselAntag
@@ -19,7 +12,6 @@
   shuttlePath: /Maps/_Mono/Shuttles/Nfsd/polaris.yml
   guidebookPage: Null
   class:
-  - Capital
   - Frigate
   - Pursuit
   - Patrol
@@ -34,6 +26,9 @@
   stations:
     PolarisShip:
       stationProto: StandardFrontierSecurityVessel
+      gridComponents:
+      - type: VesselInfo
+        description: "Is all this really worth it? A sense of regret washes over you, then dissapears."
       components:
       - type: StationNameSetup
         mapNameTemplate: 'Polaris TSFN{1}'
@@ -43,3 +38,4 @@
       - type: StationJobs
         availableJobs:
           Deputy: [ 0, 0 ]
+          TsfBorg: [ 0, 0 ]

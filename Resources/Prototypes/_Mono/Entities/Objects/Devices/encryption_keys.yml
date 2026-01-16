@@ -1,8 +1,3 @@
-# SPDX-FileCopyrightText: 2025 BlueHNT
-# SPDX-FileCopyrightText: 2025 starch
-#
-# SPDX-License-Identifier: AGPL-3.0-or-later
-
 - type: entity
   parent: EncryptionKey
   id: EncryptionKeyUssp
@@ -27,12 +22,12 @@
   parent: EncryptionKey
   id: EncryptionKeyUsspCommand
   name: USSP command encryption key
-  description: An encryption key for the USSP strategic-level communications channel.
+  description: An encryption key for the USSP command channel. Due to USSP higher-level networking being defunct, it instead provides access to tactical command.
   components:
   - type: EncryptionKey
     channels:
-    - UsspCommand
-    defaultChannel: UsspCommand
+    - Ussp
+    defaultChannel: Ussp
   - type: Item
     sprite: Objects/Devices/encryption_keys.rsi
   - type: Sprite
@@ -42,3 +37,19 @@
     - state: sec_label
   - type: PirateBountyItem
     id: EncryptionKeyFaction
+
+- type: entity
+  parent: EncryptionKey
+  id: EncryptionKeyVanguardCommand
+  name: vanguard command encryption key # mono
+  description: An encryption key used by officers in the vanguard. # Mono
+  components:
+    - type: EncryptionKey
+      channels:
+        - VanguardCommand
+      defaultChannel: VanguardCommand
+    - type: Sprite
+      layers:
+        - state: crypt_blue
+        - state: pirate_label
+
