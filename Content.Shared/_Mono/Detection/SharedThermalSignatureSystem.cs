@@ -23,7 +23,6 @@ public class SharedThermalSignatureSystem : EntitySystem
     public override void Initialize()
     {
         base.Initialize();
-        Log.Debug("Initializing Shared Termal Sinature Sytem");
         SigQuery = GetEntityQuery<ThermalSignatureComponent>();
     }
 
@@ -64,7 +63,7 @@ public class SharedThermalSignatureSystem : EntitySystem
     ///     Tries to resolve <see cref="ThermalSignatureComponent"/> and get it's heat signature, on the given entity.
     /// </summary>
     /// <returns>
-    ///     Whether a <see cref="ThermalSignatureComponent"/> was present. 
+    ///     Whether a <see cref="ThermalSignatureComponent"/> was present.
     /// </returns>
     [Pure]
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
