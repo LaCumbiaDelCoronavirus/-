@@ -15,6 +15,7 @@ using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using DependencyAttribute = Robust.Shared.IoC.DependencyAttribute;
+using Robust.Shared.Timing;
 
 namespace Content.Server._Mono.Detection;
 
@@ -24,6 +25,15 @@ namespace Content.Server._Mono.Detection;
 public sealed class ThermalSignatureSystem : SharedThermalSignatureSystem
 {
     [Dependency] private readonly SharedPowerReceiverSystem _power = default!;
+    [Dependency] private readonly IGameTiming _timing = default!;
+
+    private const float UpdateIntervalSeconds = 1f;
+    private static readonly TimeSpan UpdateInterval = TimeSpan.FromSeconds(UpdateIntervalSeconds);
+    private TimeSpan _nextUpdateTime;
+
+    private const float HeatChangeThreshold = 1.02f;
+
+    private List<Entity<ThermalSignatureComponent>> _gridQueue = new();
 
     private readonly ObjectPool<Dictionary<Vector2i, float>> _gridMatrixPool =
         new DefaultObjectPool<Dictionary<Vector2i, float>>(new DictPolicy<Vector2i, float>());
@@ -33,6 +43,7 @@ public sealed class ThermalSignatureSystem : SharedThermalSignatureSystem
     private TimeSpan _updateAccumulator = TimeSpan.FromSeconds(0);
     private EntityQuery<MapGridComponent> _gridQuery;
     private EntityQuery<GunComponent> _gunQuery;
+    private EntityQuery<MapGridComponent> _mapGridQuery;
 
     // length of cells in SolveSignatureCollections; map gets higher resolution the lower this is, therefore making this take a generally longer time to process
     // stats: 20 resolution gives ~.061 ms processing time for 55 signatures
@@ -42,6 +53,8 @@ public sealed class ThermalSignatureSystem : SharedThermalSignatureSystem
     public override void Initialize()
     {
         base.Initialize();
+
+        SubscribeLocalEvent<GridInitializeEvent>(OnGridInitialized);
 
         // some of this could also be handled in shared but there's no point since PVS is a thing
         SubscribeLocalEvent<MachineThermalSignatureComponent, GetThermalSignatureEvent>(OnMachineGetSignature);
@@ -54,6 +67,12 @@ public sealed class ThermalSignatureSystem : SharedThermalSignatureSystem
 
         _gridQuery = GetEntityQuery<MapGridComponent>();
         _gunQuery = GetEntityQuery<GunComponent>();
+        _mapGridQuery = GetEntityQuery<MapGridComponent>();
+    }
+
+    private void OnGridInitialized(GridInitializeEvent args)
+    {
+        EnsureComp<ThermalSignatureComponent>(args.EntityUid);
     }
 
     private void OnGunShot(Entity<ThermalSignatureComponent> ent, ref GunShotEvent args)
@@ -96,7 +115,7 @@ public sealed class ThermalSignatureSystem : SharedThermalSignatureSystem
 
     /// <summary>
     ///     Applys the heat of thermal signatures to surrounding cells where possible.
-    /// 
+    ///
     ///     This is separated into another method because "feature `ref and unsafe in async and iterator methods` is not available in C# 12.0."
     ///     TODO: Remove this when on C# 13.0+
     /// </summary>
@@ -130,7 +149,7 @@ public sealed class ThermalSignatureSystem : SharedThermalSignatureSystem
     /// <summary>
     ///     Creates a map of thermal signatures. This is used to simulate many, separate thermal signatures
     ///         in a small area emitting alot of heat. Returns the signatures in the hottest cell, and the signature of its cell.
-    /// 
+    ///
     ///     Only cells that have thermal signatures in them are modelled.
     /// </summary>
     public IEnumerable<(TEntityValue, float Signature, TPassedData?)> SolveSignatureCollections<TEntityValue, TPassedData>(Dictionary<TEntityValue, (Vector2 Coordinates, float Signature, TPassedData?)> entities) where TEntityValue : notnull
@@ -178,44 +197,52 @@ public sealed class ThermalSignatureSystem : SharedThermalSignatureSystem
 
     public override void Update(float frameTime)
     {
-        _updateAccumulator += TimeSpan.FromSeconds(frameTime);
-        if (_updateAccumulator < _updateInterval)
+        if (_timing.CurTime < _nextUpdateTime)
             return;
-        _updateAccumulator -= _updateInterval;
 
-        var interval = (float)_updateInterval.TotalSeconds;
+        _nextUpdateTime = _timing.CurTime + UpdateInterval;
 
-        var gridQuery = EntityQueryEnumerator<MapGridComponent>();
-        while (gridQuery.MoveNext(out var uid, out _))
+        var gridQuery = EntityQueryEnumerator<MapGridComponent, ThermalSignatureComponent>();
+        while (gridQuery.MoveNext(out _, out _, out var gridSigComp))
         {
-            var sigComp = EnsureComp<ThermalSignatureComponent>(uid);
-            sigComp.TotalHeat = 0f;
+            gridSigComp.TotalHeat = 0f;
         }
 
+        _gridQueue.Clear();
         var query = EntityQueryEnumerator<ThermalSignatureComponent>();
         while (query.MoveNext(out var uid, out var sigComp))
         {
-            var ev = new GetThermalSignatureEvent(interval);
+            var ev = new GetThermalSignatureEvent();
             RaiseLocalEvent(uid, ref ev);
-            sigComp.StoredHeat += ev.Signature * interval;
-            sigComp.StoredHeat *= MathF.Pow(sigComp.HeatDissipation, interval);
-            if (_gridQuery.HasComp(uid))
+
+            sigComp.StoredHeat += ev.Signature * UpdateIntervalSeconds;
+            sigComp.StoredHeat *= MathF.Pow(sigComp.HeatDissipation, UpdateIntervalSeconds);
+
+            if (_mapGridQuery.HasComp(uid))
             {
-                sigComp.TotalHeat += sigComp.StoredHeat;
+                _gridQueue.Add((uid, sigComp));
+                continue;
             }
             else
             {
                 var xform = Transform(uid);
                 sigComp.TotalHeat = sigComp.StoredHeat;
-                if (xform.GridUid != null && SigQuery.TryComp(xform.GridUid, out var gridSig))
+                if (xform.GridUid != null && SigQuery.TryGetComponent(xform.GridUid.Value, out var gridSig))
                     gridSig.TotalHeat += sigComp.StoredHeat;
             }
         }
 
-        var gridQuery2 = EntityQueryEnumerator<MapGridComponent, ThermalSignatureComponent>();
-        while (gridQuery2.MoveNext(out var uid, out _, out var sigComp))
+        foreach (var ent in _gridQueue)
         {
-            Dirty(uid, sigComp); // sync to client
+            ent.Comp.TotalHeat += ent.Comp.StoredHeat;
+
+            // don't sync it if it didn't change heat much since last time, we don't need to sync 500 cold asteroids every system update
+            if (ent.Comp.TotalHeat <= ent.Comp.LastUpdateHeat * HeatChangeThreshold
+                && ent.Comp.TotalHeat >= ent.Comp.LastUpdateHeat / HeatChangeThreshold)
+                continue;
+
+            ent.Comp.LastUpdateHeat = ent.Comp.TotalHeat;
+            Dirty(ent);
         }
     }
 }

@@ -64,6 +64,8 @@
       path: /Audio/Items/wirecutter.ogg
       params:
         variation: 0.125
+  - type: NailClipper # Mono
+    allowedClawTypes: ["SharpClaw"]
 
 - type: entity
   name: screwdriver
@@ -241,6 +243,7 @@
     - WirePanels
     - Airlocks
     - InspectingPower
+  - type: UnremovableClothingRemover
 
 - type: entity
   name: network configurator
@@ -376,9 +379,16 @@
     - HVCable
     - CableTerminal
     - Deconstruct
+    # mono start
+    - WallReinforced
+    - AirlockShuttle
+    - AirlockGlassShuttle
+    - SMES
+    - Substation
+    delayMultiplier: 0.65 # Mono
   - type: LimitedCharges
-    maxCharges: 30
-    charges: 30
+    maxCharges: 125 # mono 30 -> 125
+    charges: 125 # mono 30 -> 125
   - type: Sprite
     sprite: _NF/Objects/Tools/rcd.rsi # Frontier
     state: icon
@@ -403,6 +413,11 @@
   - type: ActivatableUI
     inHandsOnly: true
     key: enum.RcdUiKey.Key
+  # Monolith changes start
+  - type: Tag
+    tags:
+    - RapidConstructionTool
+  # Monolith changes end
 
 - type: entity
   id: RCDEmpty
@@ -420,8 +435,8 @@
   suffix: AutoRecharge
   components:
   - type: LimitedCharges
-    maxCharges: 20
-    charges: 20
+    maxCharges: 90 # mono 20 -> 90
+    charges: 90 # mono 20 -> 90
   - type: AutoRecharge
     rechargeDuration: 10
 
@@ -441,7 +456,13 @@
   id: RCDAmmo
   description: A cartridge of raw matter compacted by bluespace technology. Used in rapid construction devices.
   components:
-  - type: RCDAmmo
+  # Monolith changes start
+  - type: LimitedChargesAmmo
+    charges: 125 # 30 -> 125
+    whitelist:
+      tags:
+      - RapidConstructionTool
+  # Monolith changes end
   - type: Sprite
     sprite: _NF/Objects/Tools/rcd.rsi # Frontier
     state: ammo
@@ -454,7 +475,7 @@
       Plastic: 100
   - type: StaticPrice
     price: 30 # Frontier 60<30
-    vendPrice: 1000 # Frontier
+    vendPrice: 3000 # Frontier
 
 - type: entity
   name: omnitool

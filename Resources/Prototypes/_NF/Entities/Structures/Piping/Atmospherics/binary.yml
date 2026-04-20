@@ -190,6 +190,9 @@
   - type: Construction
     graph: AirlockShuttle
     node: gaslock
+  - type: ShipRepairable
+    repairTime: 6
+    repairCost: 6
 
 - type: entity
   parent: [BaseStructureDynamic, BasePressurePumpGaslock]
@@ -237,6 +240,7 @@
   - type: StaticPrice
     price: 100
   - type: Docking
+    dockType: Gas
     receiveOnly: true
   - type: DeviceNetwork
     prefix: device-address-prefix-portable-gaslock

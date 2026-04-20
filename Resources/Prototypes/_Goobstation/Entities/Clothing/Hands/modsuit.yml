@@ -1,7 +1,9 @@
+# Mono - modsuits cleanup - see #3733
 - type: entity
+  abstract: true
   parent: ClothingHandsBase
-  id: ClothingModsuitGauntletsStandard
-  name: standard modsuit gauntlets
+  id: ClothingModsuitGauntletsBase
+  name: modsuit gauntlets
   description: Special modular suit gloves that protect wearer from electric shock.
   categories: [ HideSpawnMenu ]
   components:
@@ -36,28 +38,21 @@
       - state: equipped-HAND-sealed
 
 - type: entity
-  parent: ClothingHandsBase
+  parent: ClothingModsuitGauntletsBase
+  id: ClothingModsuitGauntletsStandard
+  name: standard modsuit gauntlets
+  description: Special modular suit gloves that protect wearer from electric shock.
+  categories: [ HideSpawnMenu ]
+
+- type: entity
+  parent: ClothingModsuitGauntletsBase
   id: ClothingModsuitGauntletsSecurity
   name: soldat modsuit gauntlets
   description: Robust modular suit gloves for gripping perps and guns tight. Insulated.
   categories: [ HideSpawnMenu ]
   components:
-  - type: Appearance
   - type: Sprite
     sprite: _Goobstation/Clothing/Hands/Modsuits/security.rsi
-    layers:
-    - state: gauntlets
-    - state: gauntlets-sealed
-      visible: false
-      map: [ "sealed" ]
-  - type: Clothing
-    equipSound: /Audio/Mecha/mechmove03.ogg
-    unequipSound: /Audio/Mecha/mechmove03.ogg
-    slots: [ gloves ]
-  - type: DamageOnInteractProtection
-    damageProtection:
-      flatReductions:
-        Heat: 10
   - type: MeleeWeapon # Mono edit start
     canWideSwing: false
     attackRate: 1
@@ -68,43 +63,23 @@
     damage: 15
     overtime: 40 # Mono edit end
     sound: /Audio/Weapons/egloves.ogg
-  - type: Insulated
-  - type: Fiber
-    fiberMaterial: fibers-modular
-    fiberColor: fibers-black
-  - type: FingerprintMask
-  - type: SealableClothing
-    sealUpPopup: sealable-clothing-seal-up-gauntlets
-    sealDownPopup: sealable-clothing-seal-down-gauntlets
   - type: SealableClothingVisuals
     spriteLayer: sealed
     clothingVisuals:
       gloves:
       - state: equipped-HAND-sealed
+      gloves-vox:
+      - state: equipped-HAND-sealed-vox
 
 - type: entity
-  parent: ClothingHandsBase
+  parent: ClothingModsuitGauntletsBase
   id: ClothingModsuitGauntletsParamedic
   name: sanitater modsuit gauntlets
   description: Black and white modular suit gloves for gripping percs and patients tight. Insulated.
   categories: [ HideSpawnMenu ]
   components:
-  - type: Appearance
   - type: Sprite
     sprite: _Goobstation/Clothing/Hands/Modsuits/paramedic.rsi
-    layers:
-    - state: gauntlets
-    - state: gauntlets-sealed
-      visible: false
-      map: [ "sealed" ]
-  - type: Clothing
-    equipSound: /Audio/Mecha/mechmove03.ogg
-    unequipSound: /Audio/Mecha/mechmove03.ogg
-    slots: [ gloves ]
-  - type: DamageOnInteractProtection
-    damageProtection:
-      flatReductions:
-        Heat: 10
   - type: MeleeWeapon # Mono edit
     canWideSwing: false
     autoAttack: true
@@ -113,94 +88,48 @@
       groups:
         Burn: -4
         Brute: -3
-  - type: Insulated
-  - type: Fiber
-    fiberMaterial: fibers-modular
-    fiberColor: fibers-black
-  - type: FingerprintMask
-  - type: SealableClothing
-    sealUpPopup: sealable-clothing-seal-up-gauntlets
-    sealDownPopup: sealable-clothing-seal-down-gauntlets
   - type: SealableClothingVisuals
     spriteLayer: sealed
     clothingVisuals:
       gloves:
       - state: equipped-HAND-sealed
+      gloves-vox:
+      - state: equipped-HAND-sealed-vox
 
 - type: entity
-  parent: ClothingHandsBase
+  parent: ClothingModsuitGauntletsBase
   id: ClothingModsuitGauntletsHeadOfSecurity
   name: bulwark modsuit gauntlets
   description: Robust modular suit gloves for gripping perps and guns tight. Insulated.
   categories: [ HideSpawnMenu ]
   components:
-  - type: Appearance
   - type: Sprite
     sprite: _Goobstation/Clothing/Hands/Modsuits/headofsecurity.rsi
-    layers:
-    - state: gauntlets
-    - state: gauntlets-sealed
-      visible: false
-      map: [ "sealed" ]
   - type: Clothing
-    equipSound: /Audio/Mecha/mechmove03.ogg
-    unequipSound: /Audio/Mecha/mechmove03.ogg
-    slots: [ gloves ]
-  - type: DamageOnInteractProtection
-    damageProtection:
-      flatReductions:
-        Heat: 10
   - type: MeleeWeapon # Mono edit
-    canWideSwing: false
+    canWideSwing: true # Mono Edit
     attackRate: 1
     damage:
       types:
         Blunt: 35
-  - type: Insulated
-  - type: Fiber
-    fiberMaterial: fibers-modular
-    fiberColor: fibers-black
-  - type: FingerprintMask
-  - type: SealableClothing
-    sealUpPopup: sealable-clothing-seal-up-gauntlets
-    sealDownPopup: sealable-clothing-seal-down-gauntlets
   - type: SealableClothingVisuals
     spriteLayer: sealed
     clothingVisuals:
       gloves:
       - state: equipped-HAND-sealed
+      gloves-vox:
+      - state: equipped-HAND-sealed-vox
 
 - type: entity
-  parent: ClothingHandsBase
+  parent: ClothingModsuitGauntletsBase
   id: ClothingModsuitGauntletsEngineer
   name: sapper modsuit gauntlets
   description: Oil stained modular suit gloves for easily pushing buttons on an RCD.
   categories: [ HideSpawnMenu ]
   components:
-  - type: Appearance
   - type: Sprite
     sprite: _Goobstation/Clothing/Hands/Modsuits/engineer.rsi
-    layers:
-    - state: gauntlets
-    - state: gauntlets-sealed
-      visible: false
-      map: [ "sealed" ]
   - type: Clothing
-    equipSound: /Audio/Mecha/mechmove03.ogg
-    unequipSound: /Audio/Mecha/mechmove03.ogg
-    slots: [ gloves ]
-  - type: DamageOnInteractProtection
-    damageProtection:
-      flatReductions:
-        Heat: 10
-  - type: Insulated
-  - type: Fiber
-    fiberMaterial: fibers-modular
-    fiberColor: fibers-black
-  - type: FingerprintMask
-  - type: SealableClothing
-    sealUpPopup: sealable-clothing-seal-up-gauntlets
-    sealDownPopup: sealable-clothing-seal-down-gauntlets
   - type: SealableClothingVisuals
     spriteLayer: sealed
     clothingVisuals:
@@ -208,38 +137,19 @@
       - state: equipped-HAND-sealed
       gloves-resomi:
       - state: equipped-HAND-sealed-resomi
+      gloves-vox:
+      - state: equipped-HAND-sealed-vox
 
 - type: entity
-  parent: ClothingHandsBase
+  parent: ClothingModsuitGauntletsBase
   id: ClothingModsuitGauntletsAtmostech
   name: aeolus modsuit gauntlets
   description: Asbestos-lined modular suit gloves for easily pushing buttons on an RPD.
   categories: [ HideSpawnMenu ]
   components:
-  - type: Appearance
   - type: Sprite
     sprite: _Goobstation/Clothing/Hands/Modsuits/atmostech.rsi
-    layers:
-    - state: gauntlets
-    - state: gauntlets-sealed
-      visible: false
-      map: [ "sealed" ]
   - type: Clothing
-    equipSound: /Audio/Mecha/mechmove03.ogg
-    unequipSound: /Audio/Mecha/mechmove03.ogg
-    slots: [ gloves ]
-  - type: DamageOnInteractProtection
-    damageProtection:
-      flatReductions:
-        Heat: 10
-  - type: Insulated
-  - type: Fiber
-    fiberMaterial: fibers-modular
-    fiberColor: fibers-black
-  - type: FingerprintMask
-  - type: SealableClothing
-    sealUpPopup: sealable-clothing-seal-up-gauntlets
-    sealDownPopup: sealable-clothing-seal-down-gauntlets
   - type: SealableClothingVisuals
     spriteLayer: sealed
     clothingVisuals:
@@ -247,80 +157,44 @@
       - state: equipped-HAND-sealed
       gloves-resomi:
       - state: equipped-HAND-sealed-resomi
+      gloves-vox:
+      - state: equipped-HAND-sealed-vox
 
 - type: entity
-  parent: ClothingHandsBase
+  parent: ClothingModsuitGauntletsBase
   id: ClothingModsuitGauntletsResearchDirector
   name: minerva modsuit gauntlets
   description: For keeping your digits at 10 after the artifact goes thermonuclear on you.
   categories: [ HideSpawnMenu ]
   components:
-  - type: Appearance
   - type: Sprite
     sprite: _Goobstation/Clothing/Hands/Modsuits/researchdirector.rsi
-    layers:
-    - state: gauntlets
-    - state: gauntlets-sealed
-      visible: false
-      map: [ "sealed" ]
   - type: Clothing
-    equipSound: /Audio/Mecha/mechmove03.ogg
-    unequipSound: /Audio/Mecha/mechmove03.ogg
-    slots: [ gloves ]
-  - type: DamageOnInteractProtection
-    damageProtection:
-      flatReductions:
-        Heat: 10
-  - type: Insulated
-  - type: Fiber
-    fiberMaterial: fibers-modular
-    fiberColor: fibers-black
-  - type: FingerprintMask
-  - type: SealableClothing
-    sealUpPopup: sealable-clothing-seal-up-gauntlets
-    sealDownPopup: sealable-clothing-seal-down-gauntlets
   - type: SealableClothingVisuals
     spriteLayer: sealed
     clothingVisuals:
       gloves:
       - state: equipped-HAND-sealed
+      gloves-vox:
+      - state: equipped-HAND-sealed-vox
 
 - type: entity
-  parent: ClothingHandsBase
+  parent: ClothingModsuitGauntletsBase
   id: ClothingModsuitGauntletsCaptain
   name: magnate modsuit gauntlets
   description: Has specialised grooves and cuts for holding dat fukn diiisskk easier.
   categories: [ HideSpawnMenu ]
   components:
-  - type: Appearance
   - type: Sprite
     sprite: _Goobstation/Clothing/Hands/Modsuits/captain.rsi
-    layers:
-    - state: gauntlets
-    - state: gauntlets-sealed
-      visible: false
-      map: [ "sealed" ]
   - type: Clothing
-    equipSound: /Audio/Mecha/mechmove03.ogg
-    unequipSound: /Audio/Mecha/mechmove03.ogg
-    slots: [ gloves ]
     clothingVisuals:
         hands:
         - state: equipped-HAND
         hands-resomi:
         - state: equipped-HAND-resomi
-  - type: DamageOnInteractProtection
-    damageProtection:
-      flatReductions:
-        Heat: 10
-  - type: Insulated
-  - type: Fiber
-    fiberMaterial: fibers-modular
-    fiberColor: fibers-black
-  - type: FingerprintMask
-  - type: SealableClothing
-    sealUpPopup: sealable-clothing-seal-up-gauntlets
-    sealDownPopup: sealable-clothing-seal-down-gauntlets
+        hands-vox:
+        - state: equipped-HAND-vox
   - type: SealableClothingVisuals
     spriteLayer: sealed
     clothingVisuals:
@@ -328,4 +202,5 @@
       - state: equipped-HAND-sealed
       gloves-resomi:
       - state: equipped-HAND-sealed-resomi
-
+      gloves-vox:
+      - state: equipped-HAND-sealed-vox

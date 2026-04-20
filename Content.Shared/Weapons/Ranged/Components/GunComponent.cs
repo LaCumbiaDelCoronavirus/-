@@ -301,6 +301,12 @@ public sealed partial class GunComponent : Component
     public Angle MuzzleFlashRotationOffset;
 
     /// <summary>
+    ///     This multiplier will apply per projectile fired by the weapon.
+    /// </summary>
+    [DataField]
+    public float DamageModifier = 1f;
+
+    /// <summary>
     /// Mono
     /// Recoil to incur per ammo shot, kg*m/s.
     /// </summary>
@@ -313,6 +319,27 @@ public sealed partial class GunComponent : Component
     /// </summary>
     [DataField]
     public float RecoilRotation = 0.2f;
+
+    /// <summary>
+    /// Mono
+    /// How long executing another person takes
+    /// </summary>
+    [DataField]
+    public float ExecutionTime = 6.0f;
+
+    /// <summary>
+    /// Mono
+    /// How long executing yourself takes
+    /// </summary>
+    [DataField]
+    public float SuicideTime = 2.0f;
+
+    /// <summary>
+    /// Mono
+    /// Damage multiplier when performing an execution
+    /// </summary>
+    [DataField]
+    public float ExecutionModifier = 9.0f;
 }
 
 [Flags]

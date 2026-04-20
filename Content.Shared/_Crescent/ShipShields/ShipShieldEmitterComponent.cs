@@ -80,4 +80,10 @@ public sealed partial class ShipShieldEmitterComponent : Component
 
     [DataField]
     public SoundSpecifier PowerDownSound = new SoundPathSpecifier("/Audio/Effects/teleport_departure.ogg");
+
+    /// <summary>
+    /// While shield is active, multiplies impact energy to both grids from grid collisions by this much.
+    /// </summary>
+    [DataField]
+    public float CollisionResistanceMultiplier = 1.0f;
 }

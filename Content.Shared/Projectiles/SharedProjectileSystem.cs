@@ -40,7 +40,6 @@ public abstract partial class SharedProjectileSystem : EntitySystem
 {
     public const string ProjectileFixture = "projectile";
 
-    [Dependency] private readonly INetManager _netManager = default!;
     [Dependency] private readonly ISharedAdminLogManager _adminLogger = default!;
     [Dependency] private readonly SharedAudioSystem _audio = default!;
     [Dependency] private readonly SharedColorFlashEffectSystem _color = default!;
@@ -111,7 +110,7 @@ public abstract partial class SharedProjectileSystem : EntitySystem
     {
         // This is so entities that shouldn't get a collision are ignored.
         if (args.OurFixtureId != ProjectileFixture || !args.OtherFixture.Hard
-            || component.DamagedEntity || component.ProjectileSpent || component is { Weapon: null, OnlyCollideWhenShot: true })
+            || component.ProjectileSpent || component is { Weapon: null, OnlyCollideWhenShot: true })
             return;
 
         ProjectileCollide((uid, component, args.OurBody), args.OtherEntity);
@@ -125,13 +124,6 @@ public abstract partial class SharedProjectileSystem : EntitySystem
     public virtual DamageSpecifier? ProjectileCollide(Entity<ProjectileComponent, PhysicsComponent> projectile, EntityUid target, MapCoordinates? collisionCoordinates, bool predicted = false)
     {
         var (uid, component, ourBody) = projectile;
-        if (projectile.Comp1.DamagedEntity)
-        {
-            if (_net.IsServer && component.DeleteOnCollide)
-                QueueDel(uid);
-
-            return null;
-        }
 
         // it's here so this check is only done once before possible hit
         var attemptEv = new ProjectileReflectAttemptEvent(uid, component, false);
@@ -146,6 +138,14 @@ public abstract partial class SharedProjectileSystem : EntitySystem
         RaiseLocalEvent(uid, ref ev);
         if (ev.Handled)
             return null;
+
+        if (projectile.Comp1.ProjectileSpent)
+        {
+            if (_net.IsServer && component.DeleteOnCollide)
+                QueueDel(uid);
+
+            return null;
+        }
 
         var coordinates = collisionCoordinates != null
             ? _transform.ToCoordinates(collisionCoordinates.Value)
@@ -205,12 +205,10 @@ public abstract partial class SharedProjectileSystem : EntitySystem
             _sharedCameraRecoil.KickCamera(target, float.IsNaN(direction.X) ? Vector2.Zero : direction);
         }
 
-        component.DamagedEntity = true;
         Dirty(uid, component);
-
-        if (!predicted && component.DeleteOnCollide && (_net.IsServer || IsClientSide(uid)))
+        if (!predicted && component.DeleteOnCollide && component.ProjectileSpent && (_net.IsServer || IsClientSide(uid)))
             QueueDel(uid);
-        else if (_net.IsServer && component.DeleteOnCollide)
+        else if (_net.IsServer && component.DeleteOnCollide && component.ProjectileSpent)
         {
             var predictedComp = EnsureComp<PredictedProjectileHitComponent>(uid);
             predictedComp.Origin = _transform.GetMoverCoordinates(coordinates);
@@ -366,7 +364,7 @@ public abstract partial class SharedProjectileSystem : EntitySystem
     private void OnEmbedRemove(Entity<EmbeddableProjectileComponent> embeddable, ref RemoveEmbeddedProjectileEvent args)
     {
         // Whacky prediction issues.
-        if (args.Cancelled || _netManager.IsClient)
+        if (args.Cancelled || _net.IsClient)
             return;
 
         EmbedDetach(embeddable, embeddable.Comp, args.User);
@@ -602,6 +600,11 @@ public record struct ProjectileReflectAttemptEvent(EntityUid ProjUid, Projectile
 /// </summary>
 [ByRefEvent]
 public record struct ProjectileHitEvent(DamageSpecifier Damage, EntityUid Target, EntityUid? Shooter = null, bool Handled = false);
+
+/// <summary>
+/// Mono - raised when a projectile is spent
+/// </summary>
+public record struct ProjectileSpentEvent();
 
 /// <summary>
 /// Raised when a projectile is about to collide with an entity, allowing systems to prevent the collision

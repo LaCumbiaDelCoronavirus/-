@@ -35,7 +35,7 @@ public sealed class TargetSeekingSystem : EntitySystem
 
     /// <summary>
     /// How many potential targets can we have in <see cref="AcquireTarget"/> before
-    /// stopping looking for any new ones? 
+    /// stopping looking for any new ones?
     /// </summary>
     private const int MaximumPotentialTargets = 250;
 
@@ -73,8 +73,58 @@ public sealed class TargetSeekingSystem : EntitySystem
         _validTargetableEntities.Clear();
         var targetQuery = EntityQueryEnumerator<TargetSeekableComponent, TransformComponent>();
 
-        // The uid of the entity that shot this missile/target-seeker.
         while (targetQuery.MoveNext(out var targetUid, out _, out var targetTransformComponent))
+        {
+            /*
+            The body can either be a seekable target, or it's grid.
+            If the target has a grid, use that as the body.
+
+            Ignore this body if it's our current target, or is the body that launched us.
+            */
+
+            var bodyUid = targetTransformComponent.GridUid ?? targetUid;
+            var bodyEntity = new Entity<TransformComponent>(bodyUid, bodyUid == targetUid ? targetTransformComponent : Transform(bodyUid));
+
+            if (_validTargetableEntities.ContainsKey(bodyEntity))
+                continue;
+
+            var targetWorldCoordinates = _transform.GetWorldPosition(targetTransformComponent);
+            _validTargetableEntities[bodyEntity] = (targetWorldCoordinates, _thermalSignatureSystem.GetSignature(bodyUid));
+
+            // just stop
+            if (_validTargetableEntities.Count > MaximumPotentialTargets)
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Called on a seeker when it either loses or changes its <see cref="TargetSeekingComponent.CurrentTarget"/>, directed at the old target.
+    /// </summary>
+    private void OnChangingSeekingTarget(Entity<TargetSeekingComponent, TransformComponent?> seekerTransformEntity, EntityUid oldTargetUid)
+    {
+        if (!Resolve(seekerTransformEntity, ref seekerTransformEntity.Comp2))
+            return;
+
+        // because you shouldn't be calling this outside of SetSeekerTarget and OnTargetSeekingShutdown improperly
+        DebugTools.AssertNotNull(seekerTransformEntity.Comp1.CurrentTarget, "When raising EntityStoppedBeingSeekedTarget, CurrentTarget was already set to null!");
+
+        var changedSeekingEvent = new EntityStoppedBeingSeekedTargetEvent(seekerTransformEntity!, seekerTransformEntity.Comp1.ExposesTracking);
+        RaiseLocalEvent(oldTargetUid, ref changedSeekingEvent);
+    }
+
+    /// <summary>
+    /// Sets a target-seeking projectile's <see cref="TargetSeekingComponent.CurrentTarget"/>, and raises
+    /// the appropriate events.
+    /// </summary>
+    // NOTE: In the future, someone could want to change this to separate whether `CurrentTarget` is null with whether the seeker is actually targeting something.
+    //       If so, change this to take in whether the seeker should be targeting something, rather than whether the target exists.
+    //       Then, you'd be free to set `CurrentTarget` without needing to use this function.. ideally.
+    public void SetSeekerTarget(Entity<TargetSeekingComponent> seekerEntity, EntityUid? targetUid, TransformComponent? seekerTransform = null)
+    {
+        var (_, seekerComponent) = seekerEntity;
+
+        // if the new target is different from the old target,
+        if (seekerComponent.CurrentTarget != targetUid)
         {
             /*
             The body can either be a seekable target, or it's grid.
@@ -216,8 +266,8 @@ public sealed class TargetSeekingSystem : EntitySystem
 
     /// <summary>
     /// Sets a target-seeking projectile's <see cref="TargetSeekingComponent.CurrentTarget"/>, and raises
-    /// the appropriate events. 
-    /// 
+    /// the appropriate events.
+    ///
     /// Also sets its <see cref="TargetSeekingComponent.CurrentTargetScore"/>, if the new <paramref name="targetUid"/>
     /// and <paramref name="targetScore"/> are not null.
     /// </summary>
@@ -358,7 +408,7 @@ public sealed class TargetSeekingSystem : EntitySystem
 
             // Basically: if the target is outside of the strict-scan-angle, but inside the lenient-scan-angle, it will contribute
             // to the overall heatmap. However, it won't actually have the chance to be locked onto, unlike targets that are only
-            // in the 
+            // in the
             var discardLater = angleDifference > strictScanAngle;
             seekerComponent.IntermediateTargets[targetUid] = (entityWorldCoordinates, entitySignature, (discardLater, deltaLengthSq));
         }
@@ -435,8 +485,6 @@ public sealed class TargetSeekingSystem : EntitySystem
     // see: https://github.com/Ilya246/orbitfight/blob/master/src/entities.cpp for original
     public Angle ApplyAdvancedTracking(in Entity<TargetSeekingComponent, PhysicsComponent, TransformComponent> ent, in Entity<PhysicsComponent, TransformComponent> target)
     {
-        const int guidanceIterations = 3;
-
         var accel = ent.Comp1.Acceleration;
 
         var ownVel = _physics.GetMapLinearVelocity(ent, ent.Comp2, ent.Comp3);
@@ -446,14 +494,17 @@ public sealed class TargetSeekingSystem : EntitySystem
         var relVel = targetVel - ownVel;
         var relPos = targetPos - ownPos;
 
-        var dVx = relVel.X;
-        var dVy = relVel.Y;
-        var dX = relPos.X;
-        var dY = relPos.Y;
-        var refRot = MathF.Atan2(dVy, dVx);
-        var vel = dVx / MathF.Cos(refRot);
-        var projX = dX * MathF.Cos(refRot) + dY * MathF.Sin(refRot);
-        var projY = dY * MathF.Cos(refRot) - dX * MathF.Sin(refRot);
+        return CalculateAdvancedTracking(relPos, relVel, accel);
+    }
+
+    public Angle CalculateAdvancedTracking(Vector2 relPos, Vector2 relVel, float accel)
+    {
+        const int guidanceIterations = 3;
+
+        var vel = relVel.Length();
+        var refVec = vel == 0f ? new Vector2(1f, 0f) : relVel / vel;
+        var projX = Vector2.Dot(relPos, refVec);
+        var projY = relPos.Y * refVec.X - relPos.X * refVec.Y;
         var itime = GuessInterceptTime(0f, -projX, -vel, projY, accel);
         for (var i = 0; i < guidanceIterations; i++)
             itime = GuessInterceptTime(itime, -projX, -vel, projY, accel);
